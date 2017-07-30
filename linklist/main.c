@@ -29,6 +29,7 @@ void backadd(node **pnode,int num,datatype data);
 node *search(node *pNode,int num);
 int change(node *pNode,int oldnum,int newnum,datatype data);
 node *delete(node *pNode,int num);
+node *insert(node *pNode,int findnum,int newnum,datatype newdata);
 
 void main()
 {
@@ -64,8 +65,13 @@ void main()
 */
 
 // for delete
+   // delete(pNode,2);
 
-    delete(pNode,2);
+
+//for Insert
+    insert(pNode,1,7,17);
+//    insert(pNode,3,8,18);
+    
     shownode(pNode);
     
 
@@ -194,6 +200,49 @@ node *delete(node *pNode,int num)
 
 node *insert(node *pNode,int findnum,int newnum,datatype newdata)
 {
+    node *p1,*p2;
+    p1=p2=NULL;
+    p1=pNode;
+    
+    printf("%p",pNode);
+    while(p1 != NULL)
+    {
+        if(p1->num == findnum)
+        {
+            break;
+        }
+        else
+        {
+            p2=p1;  //Save the previous node 
+            p1=p1->pNext;
+            while(p1->pNext == NULL)
+            {
+                printf("you haven't insert a correct position!\n");
+                return pNode;
+            }
+        }
+    }
+
+    node *pNewnode=(node *)malloc(sizeof(node));
+    pNewnode->num=newnum;
+    pNewnode->data=newdata;
+
+    if(pNode == p1)  //insert it on the head
+    {
+        pNewnode->pNext = pNode;
+        pNode=pNewnode;
+
+        printf("%p %p",pNewnode,pNode);
+        return pNode;
+    }
+
+    else
+    {
+        pNewnode->pNext=p1;
+        p2->pNext=pNewnode;
+    }
+    
+    return pNode;
 
 }
 
