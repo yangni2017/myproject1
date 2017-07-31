@@ -33,6 +33,7 @@ node *insert(node *pNode,int findnum,int newnum,datatype newdata);
 node *inverted(node *pNode);
 
 void link_sort(node *pNode);
+void link_destory(node *pNode);
 
 void main()
 {
@@ -68,7 +69,7 @@ void main()
 */
 
 // for delete
-   // delete(pNode,2);
+     delete(pNode,2);
 
 
 //for Insert
@@ -79,8 +80,11 @@ void main()
   //  shownode(p2);
        
 //for sort 
-    link_sort(pNode);
+  //  link_sort(pNode);
     shownode(pNode);
+
+    
+    link_destory(pNode);
 
 }
 
@@ -303,5 +307,21 @@ void link_sort(node *pNode)
 
 
 
+void link_destory(node *pNode)
+{
+    node *p1;
+  //  p1=pNode;
+    
+    
+    while( pNode != NULL)
+    {
+        p1=pNode->pNext;
+        free(p1);
+        pNode=p1;
+    }
+   // printf("");
+    shownode(pNode);
+    
+}
 
 

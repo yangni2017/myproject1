@@ -66,15 +66,15 @@ void main()
 */
 
 // for delete
-   // delete(pNode,2);
+    node *p_delete=delete(pNode,1);
 
 
 //for Insert
   //  node *p=insert(pNode,1,7,17);
 
-    node *p=insert(pNode,1,8,18);
+ //   node *p=insert(pNode,1,8,18);
  //   node *p2 = inverted(pNode);
-    shownode(p);
+    shownode(p_delete);
        
 
 }
@@ -169,20 +169,18 @@ node *delete(node *pNode,int num)
 {
     node *p1 = NULL;
     node *p2 = NULL;
-    
+    int i;
+
     p1=pNode;   //Save the infomation of the linklist
 
     while(p1 != NULL)
     {
-        if(p1->num == num)
-        {
-            break;
-        }
-        else
-        {
-            p2=p1;  //Save the previous node 
+        for(i=1;i<num;i++)
+        {   
+            p2=p1;
             p1=p1->pNext;
         }
+        break;
     }
 
     if(p1 == pNode) 
