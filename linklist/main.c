@@ -30,15 +30,18 @@ node *search(node *pNode,int num);
 int change(node *pNode,int oldnum,int newnum,datatype data);
 node *delete(node *pNode,int num);
 node *insert(node *pNode,int findnum,int newnum,datatype newdata);
+node *inverted(node *pNode);
+
+void link_sort(node *pNode);
 
 void main()
 {
     node *pNode = NULL;
     backadd(&pNode,1,11);
-    backadd(&pNode,2,12);
-    backadd(&pNode,3,13);
-    backadd(&pNode,4,14);
-    backadd(&pNode,5,15);
+    backadd(&pNode,3,12);
+    backadd(&pNode,2,13);
+    backadd(&pNode,5,14);
+    backadd(&pNode,4,15);
     
    // shownode(pNode);
 
@@ -69,11 +72,15 @@ void main()
 
 
 //for Insert
-    insert(pNode,1,7,17);
-//    insert(pNode,3,8,18);
-    
+  //  node *p=insert(pNode,1,7,17);
+
+  //  insert(pNode,3,8,18);
+  //  node *p2 = inverted(pNode);
+  //  shownode(p2);
+       
+//for sort 
+    link_sort(pNode);
     shownode(pNode);
-    
 
 }
 
@@ -226,14 +233,12 @@ node *insert(node *pNode,int findnum,int newnum,datatype newdata)
     node *pNewnode=(node *)malloc(sizeof(node));
     pNewnode->num=newnum;
     pNewnode->data=newdata;
+    printf("%p",pNewnode);
 
     if(pNode == p1)  //insert it on the head
     {
         pNewnode->pNext = pNode;
-        pNode=pNewnode;
-
-        printf("%p %p",pNewnode,pNode);
-        return pNode;
+        pNode=pNewnode; 
     }
 
     else
@@ -243,6 +248,56 @@ node *insert(node *pNode,int findnum,int newnum,datatype newdata)
     }
     
     return pNode;
+}
+
+//inverted sequence :逆序，改变地址，不改变数据
+
+node *inverted(node *pNode)
+{
+    node *p1,*p2,*p3;
+    p1=p2=p3=NULL;
+    p1=pNode;
+    if(pNode == NULL || pNode->pNext ==NULL)
+    {
+        return pNode;
+    }
+    else
+    {
+        p1=pNode;
+        p2=pNode->pNext;
+    }
+    
+    while(p2 != NULL)
+    {
+        p3 = p2->pNext;  
+        p2->pNext=p1;
+        p1=p2;
+        p2=p3;
+    }
+    pNode->pNext = NULL;
+    pNode=p1;
+    return pNode;
+}
+
+//link_sort
+void link_sort(node *pNode)
+{
+    node *p1;
+    node *p2;
+    node tmp_node={0};
+    for(p1 = pNode;p1 != NULL;p1=p1->pNext)
+    {
+        for(p2 = pNode;p2 != NULL;p2=p2->pNext)
+        {
+            if(p1->num < p2->num)
+            {
+                tmp_node.num = p1->num;
+                p1->num = p2->num;
+                p2->num = tmp_node.num;                
+            }
+        }
+    
+    }
 
 }
 
