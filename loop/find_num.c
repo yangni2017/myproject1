@@ -34,6 +34,7 @@ void find_num(int arr[])
     }
 }
 
+
 void half_find(int arr[])
 {
     int first_num = 0;
