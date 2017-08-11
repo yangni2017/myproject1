@@ -37,6 +37,25 @@ BinTree *CreateTree(BinTree *p)
     return p;
 }
 
+#if 1
+void DestoryTree(BinTree *B)
+{
+    //printf("0");
+    if(B == NULL)
+    {
+        return;
+    }    
+    
+   // printf("%p",B->lChild);
+    DestoryTree(B->lChild);
+   // printf("2");
+    DestoryTree(B->rChild);
+   // printf("3");
+    free(B);
+    B=NULL;
+}
+#endif
+
 int Sumleaf(BinTree *T)
 {
     int sum=0,m,n;
@@ -111,7 +130,7 @@ void Copy(BinTree *T,BinTree **newTree)
     else
     {
         *newTree = (BinTree *)malloc(sizeof(BinTree));
-        (*newTree)->data = T->data;
+        (*newTree)->data=T->data;
         Copy(T->lChild,&(*newTree)->lChild);
         Copy(T->rChild,&(*newTree)->rChild);
     }
@@ -140,8 +159,14 @@ int main()
     
     printf("\n复制树后序遍历:\n");
     LastOrder(newtree);
+    printf("\n");
    // LastOrder(mytree);
+    printf("%p\n",Tree);    
     
+    DestoryTree(Tree);
+    
+    //printf("%p",Tree);
+    LastOrder(Tree);
     return 0;
 }
 
