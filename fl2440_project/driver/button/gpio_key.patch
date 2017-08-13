@@ -1,0 +1,73 @@
+--- mach.c	2017-04-19 12:32:12.287934361 -0800
++++ mach-smdk2440.c	2017-04-22 15:36:58.078925861 -0800
+@@ -52,6 +52,15 @@
+ #include <plat/common-smdk.h>
+ 
+ #include <linux/dm9000.h>  //添加DM9000网卡的头文件
++
++//add for bubtton
++#include <linux/input.h>
++
+ 
+ static struct map_desc smdk2440_iodesc[] __initdata = {
+ 	/* ISA IO Space map (memory space selected by A24) */
+@@ -231,13 +240,102 @@
+     .id= 0,
+ };
+ 
++#if 1
++//add for button
++
++   static struct gpio_keys_button rx1950_gpio_keys_table[] = {  
++    {       
++        .code  = KEY_POWER,        
++        .gpio       = S3C2410_GPF(0),     
++        .active_low = 1,        
++        .desc       = "Button_1",       
++        .wakeup     = 1,    
++    },  
++    {       
++        .code       = KEY_F5,     
++        .gpio       = S3C2410_GPF(2),       
++        .active_low = 1,        
++        .desc       = "Button_2",   
++    },  
++    {       
++        .code       = KEY_F1,     
++        .gpio       = S3C2410_GPF(3),       
++        .active_low = 1,        
++        .desc       = "Button_3",   
++    },  
++    {       
++        .code       = KEY_F2,     
++        .gpio       = S3C2410_GPF(4),      
++        .active_low = 1,        
++        .desc       = "Button_4",   
++    },
++}; 
++    
++static struct gpio_keys_platform_data rx1950_gpio_keys_data = { 
++    .buttons = rx1950_gpio_keys_table,  
++    .nbuttons = ARRAY_SIZE(rx1950_gpio_keys_table),
++};
++
++static struct platform_device rx1950_device_gpiokeys = {    
++    .name = "gpio-keys",    
++    .dev.platform_data = &rx1950_gpio_keys_data,
++};
+ 
++#endif
+ 
+ static struct platform_device *smdk2440_devices[]  __initdata = {
+ 	&s3c_device_ohci,
+@@ -253,6 +351,16 @@
+     //add for beeper
+     &s3c_device_timer,
+     &smdk2440_beeper_device,
+
++     //add for button
++    &rx1950_device_gpiokeys,
++
+ };
+ 
+ static void __init smdk2440_map_io(void)

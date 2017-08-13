@@ -1,0 +1,56 @@
+--- match.c	2017-04-19 12:33:47.962939139 -0800
++++ mach-smdk2440.c	2017-04-19 12:32:12.287934361 -0800
+@@ -23,6 +23,7 @@
+ #include <linux/platform_device.h>
+ #include <linux/io.h>
+ 
++#include <linux/gpio.h>   //add beeper inlude file 
+ 
+ #include <asm/mach/arch.h>
+ #include <asm/mach/map.h>
+@@ -218,11 +219,24 @@
+     .id = -1,
+ };
+ 
++/**************************************************************/
++
++/*add the struct of beeper*/
++static struct platform_device smdk2440_beeper_device= {  
++    .name= "pwm-beeper", 
++    .dev= {  
++        .parent = &s3c_device_timer[0].dev,//采用具有PWM脉冲宽度调制功能的定时器0；
++        .platform_data = 0,  
++    },
++    .id= 0,
++};
++
+ 
+ 
+ 
+ 
+ 
++/* ******************* */
+ 
+ 
+ static struct platform_device *smdk2440_devices[]  __initdata = {
+@@ -236,6 +250,9 @@
+     &uda1340_codec,  
+     &s3c24xx_uda134x,  
+     &samsung_asoc_dma,
++    //add for beeper
++    &s3c_device_timer,
++    &smdk2440_beeper_device,
+ };
+ 
+ static void __init smdk2440_map_io(void)
+@@ -250,6 +267,11 @@
+ {
+ 	s3c24xx_fb_set_platdata(&smdk2440_fb_info);
+ 	s3c_i2c0_set_platdata(NULL);
++    //add for beeper
++    gpio_request(S3C2410_GPB(0),"beeper");
++    s3c_gpio_setpull(S3C2410_GPB(0), S3C_GPIO_PULL_NONE); 
++    s3c_gpio_cfgpin(S3C2410_GPB(0), S3C2410_GPB0_TOUT0);
+ 
+     platform_add_devices(smdk2440_devices, ARRAY_SIZE(smdk2440_devices));
+ 	smdk_machine_init();

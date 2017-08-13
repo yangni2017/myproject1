@@ -1,0 +1,41 @@
+K 25
+svn:wc:ra_dav:version-url
+V 54
+/svn/myfl2440_yangni/!svn/ver/14/trunk/driver/platform
+END
+plat_test
+K 25
+svn:wc:ra_dav:version-url
+V 64
+/svn/myfl2440_yangni/!svn/ver/14/trunk/driver/platform/plat_test
+END
+plat_ioctl.h
+K 25
+svn:wc:ra_dav:version-url
+V 67
+/svn/myfl2440_yangni/!svn/ver/14/trunk/driver/platform/plat_ioctl.h
+END
+plat_led_test.c
+K 25
+svn:wc:ra_dav:version-url
+V 70
+/svn/myfl2440_yangni/!svn/ver/14/trunk/driver/platform/plat_led_test.c
+END
+plat_led.c
+K 25
+svn:wc:ra_dav:version-url
+V 65
+/svn/myfl2440_yangni/!svn/ver/14/trunk/driver/platform/plat_led.c
+END
+s3c_driver.h
+K 25
+svn:wc:ra_dav:version-url
+V 67
+/svn/myfl2440_yangni/!svn/ver/14/trunk/driver/platform/s3c_driver.h
+END
+makefile
+K 25
+svn:wc:ra_dav:version-url
+V 63
+/svn/myfl2440_yangni/!svn/ver/14/trunk/driver/platform/makefile
+END

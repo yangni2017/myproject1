@@ -1,0 +1,66 @@
+/*********************************************************************************
+ *      Copyright:  (C) 2017 qicheng
+ *                  All rights reserved.
+ *
+ *       Filename:  button_test.c
+ *    Description:  This file 
+ *                 
+ *        Version:  1.0.0(04/05/2017)
+ *         Author:  yangni <497049229@qq.com>
+ *      ChangeLog:  1, Release initial version on "04/05/2017 03:03:53 PM"
+ *                 
+ ********************************************************************************/
+
+#include<stdio.h>  
+#include<stdlib.h>  
+#include<unistd.h>  
+#include<sys/ioctl.h>  
+#include<sys/time.h>  
+  
+#define BUTTON_STATUS  4   
+#define KEY1  0x1   
+#define KEY2  0x2   
+#define KEY3  0x4   
+#define KEY4  0x8   
+/********************************************************************************  
+ *  Description:  
+ *   Input Args:  
+ *  Output Args:  
+ * Return Value:  
+ ********************************************************************************/  
+int main (int argc, char **argv)  
+{  
+    int i = 0;  
+    int button_fd;  
+    int ret;  
+    int current_button;  
+  
+    button_fd = open("/dev/button",0);  
+  
+    if(button_fd < 0)  
+    {  
+        printf("Open buttons device faild!\n");  
+        exit(1);  
+    }  
+    while(1)  
+    {  
+         ret = read(button_fd,current_button,sizeof(BUTTON_STATUS));  
+  
+    if (ret != sizeof(current_button) )  
+         {  
+           printf("Read button device faild.\n");   
+         }  
+    else   
+        {  
+    switch(current_button)  
+            {  
+                case KEY1: printf("KEY1 Down.!\n");break;  
+                case KEY2: printf("KEY2 Down.!\n");break;  
+                case KEY3: printf("KEY3 Down.!\n");break;  
+                case KEY4: printf("KEY4 Down.!\n");break;//其实在驱动代码的定时器中断处理程序handler中已有输出打印代码  
+                default: printf("kkey error\n");  
+            }  
+        }  
+    }  
+    return 0;  
+} /* ----- End of main() ----- */  

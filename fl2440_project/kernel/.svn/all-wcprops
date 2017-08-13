@@ -1,0 +1,35 @@
+K 25
+svn:wc:ra_dav:version-url
+V 45
+/svn/myfl2440_yangni/!svn/ver/10/trunk/kernel
+END
+kernel2.patch
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/svn/myfl2440_yangni/!svn/ver/19/trunk/kernel/kernel2.patch
+END
+kernel3.patch
+K 25
+svn:wc:ra_dav:version-url
+V 59
+/svn/myfl2440_yangni/!svn/ver/23/trunk/kernel/kernel3.patch
+END
+linux-3.0.54.tar.bz2
+K 25
+svn:wc:ra_dav:version-url
+V 66
+/svn/myfl2440_yangni/!svn/ver/10/trunk/kernel/linux-3.0.54.tar.bz2
+END
+new_kernel
+K 25
+svn:wc:ra_dav:version-url
+V 56
+/svn/myfl2440_yangni/!svn/ver/24/trunk/kernel/new_kernel
+END
+kernel.patch
+K 25
+svn:wc:ra_dav:version-url
+V 57
+/svn/myfl2440_yangni/!svn/ver/8/trunk/kernel/kernel.patch
+END

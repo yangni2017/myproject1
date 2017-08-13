@@ -1,0 +1,115 @@
+--- smdk2440.c	2012-12-03 12:59:38.000000000 -0800
++++ mach-smdk2440.c	2017-04-12 11:40:02.691913086 -0800
+@@ -44,9 +44,13 @@
+ #include <plat/clock.h>
+ #include <plat/devs.h>
+ #include <plat/cpu.h>
++//add
++#include <sound/s3c24xx_uda134x.h>
+ 
+ #include <plat/common-smdk.h>
+ 
++#include <linux/dm9000.h>  //添加DM9000网卡的头文件
++
+ static struct map_desc smdk2440_iodesc[] __initdata = {
+ 	/* ISA IO Space map (memory space selected by A24) */
+ 
+@@ -102,6 +106,50 @@
+ 	}
+ };
+ 
++ 
++/*  add DM9000 ethernet drivers ,whitch is bodify by liuchengdeng  */
++
++#define DM9000_BASE    (S3C2410_CS4 + 0x300) 
++static struct resource s3c_dm9000_resource[] = { 
++    [0] = { 
++            .start = DM9000_BASE,
++            .end   = DM9000_BASE + 3,
++            .flags = IORESOURCE_MEM 
++          },
++    [1] = { 
++            .start = DM9000_BASE + 4,
++            .end   = DM9000_BASE + 7, 
++            .flags = IORESOURCE_MEM
++          },
++    [2] = {  
++            .start = IRQ_EINT7,
++            .end   = IRQ_EINT7,
++            .flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE, 
++          }
++
++};
++
++
++static struct dm9000_plat_data s3c_dm9000_pdata = {
++    .flags      = (DM9000_PLATF_16BITONLY | DM9000_PLATF_NO_EEPROM),
++};
++
++static struct platform_device s3c_device_dm9000 = {
++    .name       = "dm9000",
++    .id     = -1,
++    .num_resources  = ARRAY_SIZE(s3c_dm9000_resource),
++    .resource   = s3c_dm9000_resource,
++    .dev        = { 
++        .platform_data  = &s3c_dm9000_pdata,
++        },
++};
++
++
++/*********END********/
++
++
++
++
+ /* LCD driver info */
+ 
+ static struct s3c2410fb_display smdk2440_lcd_cfg __initdata = {
+@@ -149,18 +197,45 @@
+ 	.lpcsel		= ((0xCE6) & ~7) | 1<<4,
+ };
+ 
+-static struct platform_device *smdk2440_devices[] __initdata = {
++//add uda134X
++static struct s3c24xx_uda134x_platform_data s3c24xx_uda134x_data = { 
++    .l3_clk = S3C2410_GPB(4),  
++    .l3_data = S3C2410_GPB(3),  
++    .l3_mode = S3C2410_GPB(2),  
++    .model = UDA134X_UDA1341,  
++};
++
++static struct platform_device s3c24xx_uda134x = {  
++    .name = "s3c24xx_uda134x",
++    .dev = { 
++        .platform_data = &s3c24xx_uda134x_data,  
++    }
++};
++
++static struct platform_device uda1340_codec = {
++    .name = "uda134x-codec",  
++    .id = -1,
++};
++
++//
++static struct platform_device *smdk2440_devices[]  __initdata = {
+ 	&s3c_device_ohci,
+ 	&s3c_device_lcd,
+ 	&s3c_device_wdt,
+ 	&s3c_device_i2c0,
+ 	&s3c_device_iis,
++    &s3c_device_dm9000,    
++    //add
++    &uda1340_codec,  
++    &s3c24xx_uda134x,  
++    &samsung_asoc_dma,  
+ };
+ 
+ static void __init smdk2440_map_io(void)
+ {
+ 	s3c24xx_init_io(smdk2440_iodesc, ARRAY_SIZE(smdk2440_iodesc));
+-	s3c24xx_init_clocks(16934400);
++	//s3c24xx_init_clocks(16934400);
++	  s3c24xx_init_clocks(12000000);
+ 	s3c24xx_init_uarts(smdk2440_uartcfgs, ARRAY_SIZE(smdk2440_uartcfgs));
+ }
+ 

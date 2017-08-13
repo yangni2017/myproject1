@@ -1,0 +1,6289 @@
+diff -Naur linux-3.0.54/！ linux-3.0.54_1/！
+--- linux-3.0.54/！	1969-12-31 16:00:00.000000000 -0800
++++ linux-3.0.54_1/！	2017-04-22 04:54:20.662975228 -0800
+@@ -0,0 +1,348 @@
++/* linux/arch/arm/mach-s3c2440/mach-smdk2440.c
++ *
++ * Copyright (c) 2004-2005 Simtec Electronics
++ *	Ben Dooks <ben@simtec.co.uk>
++ *
++ * http://www.fluff.org/ben/smdk2440/
++ *
++ * Thanks to Dimity Andric and TomTom for the loan of an SMDK2440.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++*/
++
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/interrupt.h>
++#include <linux/list.h>
++#include <linux/timer.h>
++#include <linux/init.h>
++#include <linux/serial_core.h>
++#include <linux/platform_device.h>
++#include <linux/io.h>
++
++#include <linux/gpio.h>   //add beeper inlude file 
++
++#include <asm/mach/arch.h>
++#include <asm/mach/map.h>
++#include <asm/mach/irq.h>
++
++#include <mach/hardware.h>
++#include <asm/irq.h>
++#include <asm/mach-types.h>
++
++#include <plat/regs-serial.h>
++#include <mach/regs-gpio.h>
++#include <mach/regs-lcd.h>
++
++#include <mach/idle.h>
++#include <mach/fb.h>
++#include <plat/iic.h>
++
++#include <plat/s3c2410.h>
++#include <plat/s3c244x.h>
++#include <plat/clock.h>
++#include <plat/devs.h>
++#include <plat/cpu.h>
++//add uda1341
++#include <sound/s3c24xx_uda134x.h>
++
++#include <plat/common-smdk.h>
++
++#include <linux/dm9000.h>  //添加DM9000网卡的头文件
++//add for led
++#include <linux/leds.h>
++#include <mach/regs-gpioj.h>
++#include <mach/h1940.h>
++#include <linux/gpio_keys.h>
++
++
++static struct map_desc smdk2440_iodesc[] __initdata = {
++	/* ISA IO Space map (memory space selected by A24) */
++
++	{
++		.virtual	= (u32)S3C24XX_VA_ISA_WORD,
++		.pfn		= __phys_to_pfn(S3C2410_CS2),
++		.length		= 0x10000,
++		.type		= MT_DEVICE,
++	}, {
++		.virtual	= (u32)S3C24XX_VA_ISA_WORD + 0x10000,
++		.pfn		= __phys_to_pfn(S3C2410_CS2 + (1<<24)),
++		.length		= SZ_4M,
++		.type		= MT_DEVICE,
++	}, {
++		.virtual	= (u32)S3C24XX_VA_ISA_BYTE,
++		.pfn		= __phys_to_pfn(S3C2410_CS2),
++		.length		= 0x10000,
++		.type		= MT_DEVICE,
++	}, {
++		.virtual	= (u32)S3C24XX_VA_ISA_BYTE + 0x10000,
++		.pfn		= __phys_to_pfn(S3C2410_CS2 + (1<<24)),
++		.length		= SZ_4M,
++		.type		= MT_DEVICE,
++	}
++};
++
++#define UCON S3C2410_UCON_DEFAULT | S3C2410_UCON_UCLK
++#define ULCON S3C2410_LCON_CS8 | S3C2410_LCON_PNONE | S3C2410_LCON_STOPB
++#define UFCON S3C2410_UFCON_RXTRIG8 | S3C2410_UFCON_FIFOMODE
++
++static struct s3c2410_uartcfg smdk2440_uartcfgs[] __initdata = {
++	[0] = {
++		.hwport	     = 0,
++		.flags	     = 0,
++		.ucon	     = 0x3c5,
++		.ulcon	     = 0x03,
++		.ufcon	     = 0x51,
++	},
++	[1] = {
++		.hwport	     = 1,
++		.flags	     = 0,
++		.ucon	     = 0x3c5,
++		.ulcon	     = 0x03,
++		.ufcon	     = 0x51,
++	},
++	/* IR port */
++	[2] = {
++		.hwport	     = 2,
++		.flags	     = 0,
++		.ucon	     = 0x3c5,
++		.ulcon	     = 0x43,
++		.ufcon	     = 0x51,
++	}
++};
++
++ 
++/*  add DM9000 ethernet drivers ,whitch is bodify by liuchengdeng  */
++
++#define DM9000_BASE    (S3C2410_CS4 + 0x300) 
++static struct resource s3c_dm9000_resource[] = { 
++    [0] = { 
++            .start = DM9000_BASE,
++            .end   = DM9000_BASE + 3,
++            .flags = IORESOURCE_MEM 
++          },
++    [1] = { 
++            .start = DM9000_BASE + 4,
++            .end   = DM9000_BASE + 7, 
++            .flags = IORESOURCE_MEM
++          },
++    [2] = {  
++            .start = IRQ_EINT7,
++            .end   = IRQ_EINT7,
++            .flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE, 
++          }
++
++};
++
++
++static struct dm9000_plat_data s3c_dm9000_pdata = {
++    .flags      = (DM9000_PLATF_16BITONLY | DM9000_PLATF_NO_EEPROM),
++};
++
++static struct platform_device s3c_device_dm9000 = {
++    .name       = "dm9000",
++    .id     = -1,
++    .num_resources  = ARRAY_SIZE(s3c_dm9000_resource),
++    .resource   = s3c_dm9000_resource,
++    .dev        = { 
++        .platform_data  = &s3c_dm9000_pdata,
++        },
++};
++
++
++/*********END********/
++
++
++
++
++/* LCD driver info */
++
++static struct s3c2410fb_display smdk2440_lcd_cfg __initdata = {
++
++	.lcdcon5	= S3C2410_LCDCON5_FRM565 |
++			  S3C2410_LCDCON5_INVVLINE |
++			  S3C2410_LCDCON5_INVVFRAME |
++			  S3C2410_LCDCON5_PWREN |
++			  S3C2410_LCDCON5_HWSWP,
++
++	.type		= S3C2410_LCDCON1_TFT,
++
++	.width		= 240,
++	.height		= 320,
++
++	.pixclock	= 166667, /* HCLK 60 MHz, divisor 10 */
++	.xres		= 240,
++	.yres		= 320,
++	.bpp		= 16,
++	.left_margin	= 20,
++	.right_margin	= 8,
++	.hsync_len	= 4,
++	.upper_margin	= 8,
++	.lower_margin	= 7,
++	.vsync_len	= 4,
++};
++
++static struct s3c2410fb_mach_info smdk2440_fb_info __initdata = {
++	.displays	= &smdk2440_lcd_cfg,
++	.num_displays	= 1,
++	.default_display = 0,
++
++#if 0
++	/* currently setup by downloader */
++	.gpccon		= 0xaa940659,
++	.gpccon_mask	= 0xffffffff,
++	.gpcup		= 0x0000ffff,
++	.gpcup_mask	= 0xffffffff,
++	.gpdcon		= 0xaa84aaa0,
++	.gpdcon_mask	= 0xffffffff,
++	.gpdup		= 0x0000faff,
++	.gpdup_mask	= 0xffffffff,
++#endif
++
++	.lpcsel		= ((0xCE6) & ~7) | 1<<4,
++};
++
++//add uda134X
++static struct s3c24xx_uda134x_platform_data s3c24xx_uda134x_data = { 
++    .l3_clk = S3C2410_GPB(4),  
++    .l3_data = S3C2410_GPB(3),  
++    .l3_mode = S3C2410_GPB(2),  
++    .model = UDA134X_UDA1341,  
++};
++
++static struct platform_device s3c24xx_uda134x = {  
++    .name = "s3c24xx_uda134x",
++    .dev = { 
++        .platform_data = &s3c24xx_uda134x_data,  
++    }
++};
++
++static struct platform_device uda1340_codec = {
++    .name = "uda134x-codec",  
++    .id = -1,
++};
++
++/**************************************************************/
++
++/*add the struct of beeper*/
++static struct platform_device smdk2440_beeper_device= {  
++    .name= "pwm-beeper", 
++    .dev= {  
++        .parent = &s3c_device_timer[0].dev,//采用具有PWM脉冲宽度调制功能的定时器0；
++        .platform_data = 0,  
++    },
++    .id= 0,
++};
++
++/* ******************* */
++
++#if 1
++static struct gpio_led rx1950_leds_desc[] = {
++    {
++        .name           = "led1",      
++        .default_trigger    = "main-battery-full",      
++        .gpio           = S3C2410_GPB(5),     
++        .retain_state_suspended = 1,
++    },
++
++    {
++        .name           = "led2",        
++        .default_trigger    = "love",     
++        .gpio           = S3C2410_GPB(6),        
++        .retain_state_suspended = 1,
++    
++    },
++
++    {
++        .name           = "led3",       
++        .default_trigger    = "rx1950-acx-mem",     
++        .gpio           = S3C2410_GPB(8),      
++        .retain_state_suspended  = 1,
++    
++    },
++
++    {
++        .name           = "led4",       
++        .default_trigger    = "forever",     
++        .gpio           = S3C2410_GPB(10),      
++        .retain_state_suspended  = 1,
++
++    },
++};
++static struct gpio_led_platform_data rx1950_leds_pdata = {   
++        .num_leds   = ARRAY_SIZE(rx1950_leds_desc), 
++        .leds       = rx1950_leds_desc,   
++        .gpio_blink_set = rx1950_led_blink_set,
++};
++
++
++static struct platform_device rx1950_leds = {   
++    .name   = "leds-gpio",  
++    .id     = -1,   
++    .dev    = {             
++        .platform_data = &rx1950_leds_pdata,   
++    },
++};
++
++/*****************/
++#endif
++
++
++static struct platform_device *smdk2440_devices[]  __initdata = {
++	&s3c_device_ohci,
++	&s3c_device_lcd,
++	&s3c_device_wdt,
++	&s3c_device_i2c0,
++	&s3c_device_iis,
++    &s3c_device_dm9000,    
++    //add for uda1341
++    &uda1340_codec,  
++    &s3c24xx_uda134x,  
++    &samsung_asoc_dma,
++    //add for beeper
++    &s3c_device_timer,
++    &smdk2440_beeper_device,
++
++    //add for RTC
++    &s3c_device_rtc,
++
++    //add for led
++    &rx1950_leds,    
++    
++
++};
++
++static void __init smdk2440_map_io(void)
++{
++	s3c24xx_init_io(smdk2440_iodesc, ARRAY_SIZE(smdk2440_iodesc));
++	//s3c24xx_init_clocks(16934400);
++	  s3c24xx_init_clocks(12000000);
++	s3c24xx_init_uarts(smdk2440_uartcfgs, ARRAY_SIZE(smdk2440_uartcfgs));
++}
++
++static void __init smdk2440_machine_init(void)
++{
++	s3c24xx_fb_set_platdata(&smdk2440_fb_info);
++	s3c_i2c0_set_platdata(NULL);
++    //s3c24xx_ts_set_platdata(&smdk2440_ts_cfg); //add for beeper
++    //add for beeper
++    gpio_request(S3C2410_GPB(0),"beeper");
++    s3c_gpio_setpull(S3C2410_GPB(0), S3C_GPIO_PULL_NONE); 
++    s3c_gpio_cfgpin(S3C2410_GPB(0), S3C2410_GPB0_TOUT0);
++
++    platform_add_devices(smdk2440_devices, ARRAY_SIZE(smdk2440_devices));
++	smdk_machine_init();
++}
++
++MACHINE_START(S3C2440, "SMDK2440")
++	/* Maintainer: Ben Dooks <ben-linux@fluff.org> */
++	.boot_params	= S3C2410_SDRAM_PA + 0x100,
++
++	.init_irq	= s3c24xx_init_irq,
++	.map_io		= smdk2440_map_io,
++	.init_machine	= smdk2440_machine_init,
++	.timer		= &s3c24xx_timer,
++MACHINE_END
+diff -Naur linux-3.0.54/arch/arm/mach-s3c2410/mach-smdk2440.c linux-3.0.54_1/arch/arm/mach-s3c2410/mach-smdk2440.c
+--- linux-3.0.54/arch/arm/mach-s3c2410/mach-smdk2440.c	1969-12-31 16:00:00.000000000 -0800
++++ linux-3.0.54_1/arch/arm/mach-s3c2410/mach-smdk2440.c	2017-04-19 13:16:55.926933671 -0800
+@@ -0,0 +1,288 @@
++/* linux/arch/arm/mach-s3c2440/mach-smdk2440.c
++ *
++ * Copyright (c) 2004-2005 Simtec Electronics
++ *	Ben Dooks <ben@simtec.co.uk>
++ *
++ * http://www.fluff.org/ben/smdk2440/
++ *
++ * Thanks to Dimity Andric and TomTom for the loan of an SMDK2440.
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License version 2 as
++ * published by the Free Software Foundation.
++ *
++*/
++
++#include <linux/kernel.h>
++#include <linux/types.h>
++#include <linux/interrupt.h>
++#include <linux/list.h>
++#include <linux/timer.h>
++#include <linux/init.h>
++#include <linux/serial_core.h>
++#include <linux/platform_device.h>
++#include <linux/io.h>
++
++#include <linux/gpio.h>   //add beeper inlude file 
++
++#include <asm/mach/arch.h>
++#include <asm/mach/map.h>
++#include <asm/mach/irq.h>
++
++#include <mach/hardware.h>
++#include <asm/irq.h>
++#include <asm/mach-types.h>
++
++#include <plat/regs-serial.h>
++#include <mach/regs-gpio.h>
++#include <mach/regs-lcd.h>
++
++#include <mach/idle.h>
++#include <mach/fb.h>
++#include <plat/iic.h>
++
++#include <plat/s3c2410.h>
++#include <plat/s3c244x.h>
++#include <plat/clock.h>
++#include <plat/devs.h>
++#include <plat/cpu.h>
++//add uda1341
++#include <sound/s3c24xx_uda134x.h>
++
++#include <plat/common-smdk.h>
++
++#include <linux/dm9000.h>  //添加DM9000网卡的头文件
++
++static struct map_desc smdk2440_iodesc[] __initdata = {
++	/* ISA IO Space map (memory space selected by A24) */
++
++	{
++		.virtual	= (u32)S3C24XX_VA_ISA_WORD,
++		.pfn		= __phys_to_pfn(S3C2410_CS2),
++		.length		= 0x10000,
++		.type		= MT_DEVICE,
++	}, {
++		.virtual	= (u32)S3C24XX_VA_ISA_WORD + 0x10000,
++		.pfn		= __phys_to_pfn(S3C2410_CS2 + (1<<24)),
++		.length		= SZ_4M,
++		.type		= MT_DEVICE,
++	}, {
++		.virtual	= (u32)S3C24XX_VA_ISA_BYTE,
++		.pfn		= __phys_to_pfn(S3C2410_CS2),
++		.length		= 0x10000,
++		.type		= MT_DEVICE,
++	}, {
++		.virtual	= (u32)S3C24XX_VA_ISA_BYTE + 0x10000,
++		.pfn		= __phys_to_pfn(S3C2410_CS2 + (1<<24)),
++		.length		= SZ_4M,
++		.type		= MT_DEVICE,
++	}
++};
++
++#define UCON S3C2410_UCON_DEFAULT | S3C2410_UCON_UCLK
++#define ULCON S3C2410_LCON_CS8 | S3C2410_LCON_PNONE | S3C2410_LCON_STOPB
++#define UFCON S3C2410_UFCON_RXTRIG8 | S3C2410_UFCON_FIFOMODE
++
++static struct s3c2410_uartcfg smdk2440_uartcfgs[] __initdata = {
++	[0] = {
++		.hwport	     = 0,
++		.flags	     = 0,
++		.ucon	     = 0x3c5,
++		.ulcon	     = 0x03,
++		.ufcon	     = 0x51,
++	},
++	[1] = {
++		.hwport	     = 1,
++		.flags	     = 0,
++		.ucon	     = 0x3c5,
++		.ulcon	     = 0x03,
++		.ufcon	     = 0x51,
++	},
++	/* IR port */
++	[2] = {
++		.hwport	     = 2,
++		.flags	     = 0,
++		.ucon	     = 0x3c5,
++		.ulcon	     = 0x43,
++		.ufcon	     = 0x51,
++	}
++};
++
++ 
++/*  add DM9000 ethernet drivers ,whitch is bodify by liuchengdeng  */
++
++#define DM9000_BASE    (S3C2410_CS4 + 0x300) 
++static struct resource s3c_dm9000_resource[] = { 
++    [0] = { 
++            .start = DM9000_BASE,
++            .end   = DM9000_BASE + 3,
++            .flags = IORESOURCE_MEM 
++          },
++    [1] = { 
++            .start = DM9000_BASE + 4,
++            .end   = DM9000_BASE + 7, 
++            .flags = IORESOURCE_MEM
++          },
++    [2] = {  
++            .start = IRQ_EINT7,
++            .end   = IRQ_EINT7,
++            .flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE, 
++          }
++
++};
++
++
++static struct dm9000_plat_data s3c_dm9000_pdata = {
++    .flags      = (DM9000_PLATF_16BITONLY | DM9000_PLATF_NO_EEPROM),
++};
++
++static struct platform_device s3c_device_dm9000 = {
++    .name       = "dm9000",
++    .id     = -1,
++    .num_resources  = ARRAY_SIZE(s3c_dm9000_resource),
++    .resource   = s3c_dm9000_resource,
++    .dev        = { 
++        .platform_data  = &s3c_dm9000_pdata,
++        },
++};
++
++
++/*********END********/
++
++
++
++
++/* LCD driver info */
++
++static struct s3c2410fb_display smdk2440_lcd_cfg __initdata = {
++
++	.lcdcon5	= S3C2410_LCDCON5_FRM565 |
++			  S3C2410_LCDCON5_INVVLINE |
++			  S3C2410_LCDCON5_INVVFRAME |
++			  S3C2410_LCDCON5_PWREN |
++			  S3C2410_LCDCON5_HWSWP,
++
++	.type		= S3C2410_LCDCON1_TFT,
++
++	.width		= 240,
++	.height		= 320,
++
++	.pixclock	= 166667, /* HCLK 60 MHz, divisor 10 */
++	.xres		= 240,
++	.yres		= 320,
++	.bpp		= 16,
++	.left_margin	= 20,
++	.right_margin	= 8,
++	.hsync_len	= 4,
++	.upper_margin	= 8,
++	.lower_margin	= 7,
++	.vsync_len	= 4,
++};
++
++static struct s3c2410fb_mach_info smdk2440_fb_info __initdata = {
++	.displays	= &smdk2440_lcd_cfg,
++	.num_displays	= 1,
++	.default_display = 0,
++
++#if 0
++	/* currently setup by downloader */
++	.gpccon		= 0xaa940659,
++	.gpccon_mask	= 0xffffffff,
++	.gpcup		= 0x0000ffff,
++	.gpcup_mask	= 0xffffffff,
++	.gpdcon		= 0xaa84aaa0,
++	.gpdcon_mask	= 0xffffffff,
++	.gpdup		= 0x0000faff,
++	.gpdup_mask	= 0xffffffff,
++#endif
++
++	.lpcsel		= ((0xCE6) & ~7) | 1<<4,
++};
++
++//add uda134X
++static struct s3c24xx_uda134x_platform_data s3c24xx_uda134x_data = { 
++    .l3_clk = S3C2410_GPB(4),  
++    .l3_data = S3C2410_GPB(3),  
++    .l3_mode = S3C2410_GPB(2),  
++    .model = UDA134X_UDA1341,  
++};
++
++static struct platform_device s3c24xx_uda134x = {  
++    .name = "s3c24xx_uda134x",
++    .dev = { 
++        .platform_data = &s3c24xx_uda134x_data,  
++    }
++};
++
++static struct platform_device uda1340_codec = {
++    .name = "uda134x-codec",  
++    .id = -1,
++};
++
++/**************************************************************/
++
++/*add the struct of beeper*/
++static struct platform_device smdk2440_beeper_device= {  
++    .name= "pwm-beeper", 
++    .dev= {  
++        .parent = &s3c_device_timer[0].dev,//采用具有PWM脉冲宽度调制功能的定时器0；
++        .platform_data = 0,  
++    },
++    .id= 0,
++};
++
++
++
++
++
++
++/* ******************* */
++
++
++static struct platform_device *smdk2440_devices[]  __initdata = {
++	&s3c_device_ohci,
++	&s3c_device_lcd,
++	&s3c_device_wdt,
++	&s3c_device_i2c0,
++	&s3c_device_iis,
++    &s3c_device_dm9000,    
++    //add for uda1341
++    &uda1340_codec,  
++    &s3c24xx_uda134x,  
++    &samsung_asoc_dma,
++    //add for beeper
++    &s3c_device_timer,
++    &smdk2440_beeper_device,
++};
++
++static void __init smdk2440_map_io(void)
++{
++	s3c24xx_init_io(smdk2440_iodesc, ARRAY_SIZE(smdk2440_iodesc));
++	//s3c24xx_init_clocks(16934400);
++	  s3c24xx_init_clocks(12000000);
++	s3c24xx_init_uarts(smdk2440_uartcfgs, ARRAY_SIZE(smdk2440_uartcfgs));
++}
++
++static void __init smdk2440_machine_init(void)
++{
++	s3c24xx_fb_set_platdata(&smdk2440_fb_info);
++	s3c_i2c0_set_platdata(NULL);
++    //s3c24xx_ts_set_platdata(&smdk2440_ts_cfg); //add for beeper
++    //add for beeper
++    gpio_request(S3C2410_GPB(0),"beeper");
++    s3c_gpio_setpull(S3C2410_GPB(0), S3C_GPIO_PULL_NONE); 
++    s3c_gpio_cfgpin(S3C2410_GPB(0), S3C2410_GPB0_TOUT0);
++
++    platform_add_devices(smdk2440_devices, ARRAY_SIZE(smdk2440_devices));
++	smdk_machine_init();
++}
++
++MACHINE_START(S3C2440, "SMDK2440")
++	/* Maintainer: Ben Dooks <ben-linux@fluff.org> */
++	.boot_params	= S3C2410_SDRAM_PA + 0x100,
++
++	.init_irq	= s3c24xx_init_irq,
++	.map_io		= smdk2440_map_io,
++	.init_machine	= smdk2440_machine_init,
++	.timer		= &s3c24xx_timer,
++MACHINE_END
+diff -Naur linux-3.0.54/arch/arm/mach-s3c2440/mach-smdk2440.c linux-3.0.54_1/arch/arm/mach-s3c2440/mach-smdk2440.c
+--- linux-3.0.54/arch/arm/mach-s3c2440/mach-smdk2440.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/arch/arm/mach-s3c2440/mach-smdk2440.c	2017-04-22 13:09:30.432936871 -0800
+@@ -23,6 +23,8 @@
+ #include <linux/platform_device.h>
+ #include <linux/io.h>
+ 
++#include <linux/gpio.h>   //add beeper inlude file 
++
+ #include <asm/mach/arch.h>
+ #include <asm/mach/map.h>
+ #include <asm/mach/irq.h>
+@@ -44,9 +46,22 @@
+ #include <plat/clock.h>
+ #include <plat/devs.h>
+ #include <plat/cpu.h>
++//add uda1341
++#include <sound/s3c24xx_uda134x.h>
+ 
+ #include <plat/common-smdk.h>
+ 
++#include <linux/dm9000.h>  //添加DM9000网卡的头文件
++//add for led
++#include <linux/leds.h>
++#include <mach/regs-gpioj.h>
++#include <mach/h1940.h>
++#include <linux/gpio_keys.h>
++
++//add for bubtton
++#include <linux/input.h>
++
++
+ static struct map_desc smdk2440_iodesc[] __initdata = {
+ 	/* ISA IO Space map (memory space selected by A24) */
+ 
+@@ -102,6 +117,50 @@
+ 	}
+ };
+ 
++ 
++/*  add DM9000 ethernet drivers ,whitch is bodify by liuchengdeng  */
++
++#define DM9000_BASE    (S3C2410_CS4 + 0x300) 
++static struct resource s3c_dm9000_resource[] = { 
++    [0] = { 
++            .start = DM9000_BASE,
++            .end   = DM9000_BASE + 3,
++            .flags = IORESOURCE_MEM 
++          },
++    [1] = { 
++            .start = DM9000_BASE + 4,
++            .end   = DM9000_BASE + 7, 
++            .flags = IORESOURCE_MEM
++          },
++    [2] = {  
++            .start = IRQ_EINT7,
++            .end   = IRQ_EINT7,
++            .flags = IORESOURCE_IRQ | IORESOURCE_IRQ_HIGHEDGE, 
++          }
++
++};
++
++
++static struct dm9000_plat_data s3c_dm9000_pdata = {
++    .flags      = (DM9000_PLATF_16BITONLY | DM9000_PLATF_NO_EEPROM),
++};
++
++static struct platform_device s3c_device_dm9000 = {
++    .name       = "dm9000",
++    .id     = -1,
++    .num_resources  = ARRAY_SIZE(s3c_dm9000_resource),
++    .resource   = s3c_dm9000_resource,
++    .dev        = { 
++        .platform_data  = &s3c_dm9000_pdata,
++        },
++};
++
++
++/*********END********/
++
++
++
++
+ /* LCD driver info */
+ 
+ static struct s3c2410fb_display smdk2440_lcd_cfg __initdata = {
+@@ -149,18 +208,166 @@
+ 	.lpcsel		= ((0xCE6) & ~7) | 1<<4,
+ };
+ 
+-static struct platform_device *smdk2440_devices[] __initdata = {
++//add uda134X
++static struct s3c24xx_uda134x_platform_data s3c24xx_uda134x_data = { 
++    .l3_clk = S3C2410_GPB(4),  
++    .l3_data = S3C2410_GPB(3),  
++    .l3_mode = S3C2410_GPB(2),  
++    .model = UDA134X_UDA1341,  
++};
++
++static struct platform_device s3c24xx_uda134x = {  
++    .name = "s3c24xx_uda134x",
++    .dev = { 
++        .platform_data = &s3c24xx_uda134x_data,  
++    }
++};
++
++static struct platform_device uda1340_codec = {
++    .name = "uda134x-codec",  
++    .id = -1,
++};
++
++/**************************************************************/
++
++/*add the struct of beeper*/
++static struct platform_device smdk2440_beeper_device= {  
++    .name= "pwm-beeper", 
++    .dev= {  
++        .parent = &s3c_device_timer[0].dev,//采用具有PWM脉冲宽度调制功能的定时器0；
++        .platform_data = 0,  
++    },
++    .id= 0,
++};
++
++/* ******************* */
++
++#if 0
++static struct gpio_led rx1950_leds_desc[] = {
++    {
++        .name           = "led1",      
++        .default_trigger    = "main-battery-full",      
++        .gpio           = S3C2410_GPB(5),     
++        .retain_state_suspended = 1,
++    },
++
++    {
++        .name           = "led2",        
++        .default_trigger    = "football",     
++        .gpio           = S3C2410_GPB(6),        
++        .retain_state_suspended = 1,
++    
++    },
++
++    {
++        .name           = "led3",       
++        .default_trigger    = "rx1950-acx-mem",     
++        .gpio           = S3C2410_GPB(8),      
++        .retain_state_suspended  = 1,
++    
++    },
++
++    {
++        .name           = "led4",       
++        .default_trigger    = "forever",     
++        .gpio           = S3C2410_GPB(10),      
++        .retain_state_suspended  = 1,
++
++    },
++};
++
++
++static struct gpio_led_platform_data rx1950_leds_pdata = {   
++        .num_leds   = ARRAY_SIZE(rx1950_leds_desc), 
++        .leds       = rx1950_leds_desc,   
++        .gpio_blink_set = 0,
++};
++
++static struct platform_device rx1950_leds = {   
++    .name   = "leds-gpio",  
++    .id     = -1,   
++    .dev    = {             
++        .platform_data = &rx1950_leds_pdata,   
++    },
++};
++
++/*****************/
++#endif
++
++#if 1
++//add for button
++
++   static struct gpio_keys_button rx1950_gpio_keys_table[] = {  
++    {       
++        .code  = KEY_POWER,        
++        .gpio       = S3C2410_GPF(0),     
++        .active_low = 1,        
++        .desc       = "Button_1",       
++        .wakeup     = 1,    
++    },  
++    {       
++        .code       = KEY_F5,     
++        .gpio       = S3C2410_GPF(2),       
++        .active_low = 1,        
++        .desc       = "Button_2",   
++    },  
++    {       
++        .code       = KEY_F1,     
++        .gpio       = S3C2410_GPF(3),       
++        .active_low = 1,        
++        .desc       = "Button_3",   
++    },  
++    {       
++        .code       = KEY_F2,     
++        .gpio       = S3C2410_GPF(4),      
++        .active_low = 1,        
++        .desc       = "Button_4",   
++    },
++}; 
++    
++static struct gpio_keys_platform_data rx1950_gpio_keys_data = { 
++    .buttons = rx1950_gpio_keys_table,  
++    .nbuttons = ARRAY_SIZE(rx1950_gpio_keys_table),
++};
++
++static struct platform_device rx1950_device_gpiokeys = {    
++    .name = "gpio-keys",    
++    .dev.platform_data = &rx1950_gpio_keys_data,
++};
++
++#endif
++
++static struct platform_device *smdk2440_devices[]  __initdata = {
+ 	&s3c_device_ohci,
+ 	&s3c_device_lcd,
+ 	&s3c_device_wdt,
+ 	&s3c_device_i2c0,
+ 	&s3c_device_iis,
++    &s3c_device_dm9000,    
++    //add for uda1341
++    &uda1340_codec,  
++    &s3c24xx_uda134x,  
++    &samsung_asoc_dma,
++    //add for beeper
++    &s3c_device_timer,
++    &smdk2440_beeper_device,
++
++    //add for RTC
++    &s3c_device_rtc,
++
++    //add for led
++    //&rx1950_leds,    
++    
++    //add for button
++    &rx1950_device_gpiokeys,
++
+ };
+ 
+ static void __init smdk2440_map_io(void)
+ {
+ 	s3c24xx_init_io(smdk2440_iodesc, ARRAY_SIZE(smdk2440_iodesc));
+-	s3c24xx_init_clocks(16934400);
++	//s3c24xx_init_clocks(16934400);
++	  s3c24xx_init_clocks(12000000);
+ 	s3c24xx_init_uarts(smdk2440_uartcfgs, ARRAY_SIZE(smdk2440_uartcfgs));
+ }
+ 
+@@ -168,8 +375,13 @@
+ {
+ 	s3c24xx_fb_set_platdata(&smdk2440_fb_info);
+ 	s3c_i2c0_set_platdata(NULL);
++    //s3c24xx_ts_set_platdata(&smdk2440_ts_cfg); //add for beeper
++    //add for beeper
++    gpio_request(S3C2410_GPB(0),"beeper");
++    s3c_gpio_setpull(S3C2410_GPB(0), S3C_GPIO_PULL_NONE); 
++    s3c_gpio_cfgpin(S3C2410_GPB(0), S3C2410_GPB0_TOUT0);
+ 
+-	platform_add_devices(smdk2440_devices, ARRAY_SIZE(smdk2440_devices));
++    platform_add_devices(smdk2440_devices, ARRAY_SIZE(smdk2440_devices));
+ 	smdk_machine_init();
+ }
+ 
+diff -Naur linux-3.0.54/arch/arm/plat-s3c24xx/common-smdk.c linux-3.0.54_1/arch/arm/plat-s3c24xx/common-smdk.c
+--- linux-3.0.54/arch/arm/plat-s3c24xx/common-smdk.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/arch/arm/plat-s3c24xx/common-smdk.c	2017-04-22 09:48:32.751946505 -0800
+@@ -49,27 +49,27 @@
+ /* LED devices */
+ 
+ static struct s3c24xx_led_platdata smdk_pdata_led4 = {
+-	.gpio		= S3C2410_GPF(4),
++	.gpio		= S3C2410_GPB(5),
+ 	.flags		= S3C24XX_LEDF_ACTLOW | S3C24XX_LEDF_TRISTATE,
+ 	.name		= "led4",
+ 	.def_trigger	= "timer",
+ };
+ 
+ static struct s3c24xx_led_platdata smdk_pdata_led5 = {
+-	.gpio		= S3C2410_GPF(5),
++	.gpio		= S3C2410_GPB(6),
+ 	.flags		= S3C24XX_LEDF_ACTLOW | S3C24XX_LEDF_TRISTATE,
+ 	.name		= "led5",
+ 	.def_trigger	= "nand-disk",
+ };
+ 
+ static struct s3c24xx_led_platdata smdk_pdata_led6 = {
+-	.gpio		= S3C2410_GPF(6),
++	.gpio		= S3C2410_GPB(8),
+ 	.flags		= S3C24XX_LEDF_ACTLOW | S3C24XX_LEDF_TRISTATE,
+ 	.name		= "led6",
+ };
+ 
+ static struct s3c24xx_led_platdata smdk_pdata_led7 = {
+-	.gpio		= S3C2410_GPF(7),
++	.gpio		= S3C2410_GPB(10),
+ 	.flags		= S3C24XX_LEDF_ACTLOW | S3C24XX_LEDF_TRISTATE,
+ 	.name		= "led7",
+ };
+@@ -106,49 +106,43 @@
+ 	},
+ };
+ 
+-/* NAND parititon from 2.4.18-swl5 */
++/*  NAND parititon from 2.4.18-swl5,modify by Handy 2014.11.30  */
+ 
+ static struct mtd_partition smdk_default_nand_part[] = {
+ 	[0] = {
+-		.name	= "Boot Agent",
+-		.size	= SZ_16K,
+-		.offset	= 0,
++        .name   = "bootloader",
++        .size   = SZ_1M*1,
++        .offset	= 0,
+ 	},
++
+ 	[1] = {
+-		.name	= "S3C2410 flash partition 1",
+-		.offset = 0,
+-		.size	= SZ_2M,
+-	},
+-	[2] = {
+-		.name	= "S3C2410 flash partition 2",
+-		.offset = SZ_4M,
+-		.size	= SZ_4M,
+-	},
+-	[3] = {
+-		.name	= "S3C2410 flash partition 3",
+-		.offset	= SZ_8M,
+-		.size	= SZ_2M,
+-	},
++         .name   = "linux",
++         .size   = SZ_1M*15,
++         .offset = SZ_1M,
++	},
++
++    [2] = {
++         .name   = "jffs2",
++         .size   = SZ_1M*20,
++         .offset = SZ_1M*16,
++	},
++
++    [3] = { 
++         .name   = "ubifs",
++         .size   = SZ_1M*40,
++         .offset = SZ_1M*36,
++    },
++
+ 	[4] = {
+-		.name	= "S3C2410 flash partition 4",
+-		.offset = SZ_1M * 10,
+-		.size	= SZ_4M,
++         .name   = "apps",
++         .size   = SZ_1M*80,
++         .offset = SZ_1M*76,
+ 	},
+ 	[5] = {
+-		.name	= "S3C2410 flash partition 5",
+-		.offset	= SZ_1M * 14,
+-		.size	= SZ_1M * 10,
+-	},
+-	[6] = {
+-		.name	= "S3C2410 flash partition 6",
+-		.offset	= SZ_1M * 24,
+-		.size	= SZ_1M * 24,
+-	},
+-	[7] = {
+-		.name	= "S3C2410 flash partition 7",
+-		.offset = SZ_1M * 48,
+-		.size	= MTDPART_SIZ_FULL,
+-	}
++         .name   = "data",
++         .size   = SZ_1M*100,
++         .offset = SZ_1M*156,
++	},
+ };
+ 
+ static struct s3c2410_nand_set smdk_nand_sets[] = {
+@@ -169,10 +163,7 @@
+ 	.twrph0		= 60,
+ 	.twrph1		= 20,
+ 	.nr_sets	= ARRAY_SIZE(smdk_nand_sets),
+-	.sets		= smdk_nand_sets,
+-};
+-
+-/* devices we initialise */
++	.sets		= smdk_nand_sets, }; /* devices we initialise */
+ 
+ static struct platform_device __initdata *smdk_devs[] = {
+ 	&s3c_device_nand,
+@@ -186,15 +177,15 @@
+ {
+ 	/* Configure the LEDs (even if we have no LED support)*/
+ 
+-	s3c_gpio_cfgpin(S3C2410_GPF(4), S3C2410_GPIO_OUTPUT);
+-	s3c_gpio_cfgpin(S3C2410_GPF(5), S3C2410_GPIO_OUTPUT);
+-	s3c_gpio_cfgpin(S3C2410_GPF(6), S3C2410_GPIO_OUTPUT);
+-	s3c_gpio_cfgpin(S3C2410_GPF(7), S3C2410_GPIO_OUTPUT);
+-
+-	s3c2410_gpio_setpin(S3C2410_GPF(4), 1);
+-	s3c2410_gpio_setpin(S3C2410_GPF(5), 1);
+-	s3c2410_gpio_setpin(S3C2410_GPF(6), 1);
+-	s3c2410_gpio_setpin(S3C2410_GPF(7), 1);
++	s3c_gpio_cfgpin(S3C2410_GPB(5), S3C2410_GPIO_OUTPUT);
++	s3c_gpio_cfgpin(S3C2410_GPB(6), S3C2410_GPIO_OUTPUT);
++	s3c_gpio_cfgpin(S3C2410_GPB(8), S3C2410_GPIO_OUTPUT);
++	s3c_gpio_cfgpin(S3C2410_GPB(10), S3C2410_GPIO_OUTPUT);
++
++	s3c_gpio_cfgpin(S3C2410_GPB(6), S3C2410_GPIO_OUTPUT);
++	s3c2410_gpio_setpin(S3C2410_GPB(5), 1);
++	s3c2410_gpio_setpin(S3C2410_GPB(6), 1);
++	s3c2410_gpio_setpin(S3C2410_GPB(8), 1);
+ 
+ 	if (machine_is_smdk2443())
+ 		smdk_nand_info.twrph0 = 50;
+diff -Naur linux-3.0.54/arch/arm/tools/mach-types linux-3.0.54_1/arch/arm/tools/mach-types
+--- linux-3.0.54/arch/arm/tools/mach-types	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/arch/arm/tools/mach-types	2017-04-05 12:17:42.410920489 -0800
+@@ -85,7 +85,7 @@
+ bast			ARCH_BAST		BAST			331
+ h1940			ARCH_H1940		H1940			347
+ enp2611			ARCH_ENP2611		ENP2611			356
+-s3c2440			ARCH_S3C2440		S3C2440			362
++s3c2440			ARCH_S3C2440		S3C2440		    1999
+ gumstix			ARCH_GUMSTIX		GUMSTIX			373
+ omap_h2			MACH_OMAP_H2		OMAP_H2			382
+ e740			MACH_E740		E740			384
+@@ -356,7 +356,7 @@
+ snapper_9260		MACH_SNAPPER_9260	SNAPPER_9260		1987
+ dsm320			MACH_DSM320		DSM320			1988
+ exeda			MACH_EXEDA		EXEDA			1994
+-mini2440		MACH_MINI2440		MINI2440		1999
++mini2440		MACH_MINI2440		MINI2440		362
+ colibri300		MACH_COLIBRI300		COLIBRI300		2000
+ linkstation_ls_hgl	MACH_LINKSTATION_LS_HGL	LINKSTATION_LS_HGL	2005
+ cpuat9g20		MACH_CPUAT9G20		CPUAT9G20		2031
+diff -Naur linux-3.0.54/.config linux-3.0.54_1/.config
+--- linux-3.0.54/.config	1969-12-31 16:00:00.000000000 -0800
++++ linux-3.0.54_1/.config	2017-04-19 13:26:54.629941595 -0800
+@@ -0,0 +1,2331 @@
++#
++# Automatically generated make config: don't edit
++# Linux/arm 3.0.54 Kernel Configuration
++#
++CONFIG_ARM=y
++CONFIG_HAVE_PWM=y
++CONFIG_SYS_SUPPORTS_APM_EMULATION=y
++CONFIG_GENERIC_GPIO=y
++CONFIG_ARCH_USES_GETTIMEOFFSET=y
++CONFIG_KTIME_SCALAR=y
++CONFIG_HAVE_PROC_CPU=y
++CONFIG_NO_IOPORT=y
++CONFIG_STACKTRACE_SUPPORT=y
++CONFIG_HAVE_LATENCYTOP_SUPPORT=y
++CONFIG_LOCKDEP_SUPPORT=y
++CONFIG_TRACE_IRQFLAGS_SUPPORT=y
++CONFIG_HARDIRQS_SW_RESEND=y
++CONFIG_GENERIC_IRQ_PROBE=y
++CONFIG_RWSEM_GENERIC_SPINLOCK=y
++CONFIG_ARCH_HAS_CPUFREQ=y
++CONFIG_ARCH_HAS_CPU_IDLE_WAIT=y
++CONFIG_GENERIC_HWEIGHT=y
++CONFIG_GENERIC_CALIBRATE_DELAY=y
++CONFIG_NEED_DMA_MAP_STATE=y
++CONFIG_VECTORS_BASE=0xffff0000
++# CONFIG_ARM_PATCH_PHYS_VIRT is not set
++CONFIG_DEFCONFIG_LIST="/lib/modules/$UNAME_RELEASE/.config"
++CONFIG_HAVE_IRQ_WORK=y
++
++#
++# General setup
++#
++CONFIG_EXPERIMENTAL=y
++CONFIG_BROKEN_ON_SMP=y
++CONFIG_INIT_ENV_ARG_LIMIT=32
++CONFIG_CROSS_COMPILE=""
++CONFIG_LOCALVERSION=""
++# CONFIG_LOCALVERSION_AUTO is not set
++CONFIG_HAVE_KERNEL_GZIP=y
++CONFIG_HAVE_KERNEL_LZMA=y
++CONFIG_HAVE_KERNEL_LZO=y
++CONFIG_KERNEL_GZIP=y
++# CONFIG_KERNEL_LZMA is not set
++# CONFIG_KERNEL_LZO is not set
++CONFIG_DEFAULT_HOSTNAME="(none)"
++CONFIG_SWAP=y
++CONFIG_SYSVIPC=y
++CONFIG_SYSVIPC_SYSCTL=y
++CONFIG_POSIX_MQUEUE=y
++CONFIG_POSIX_MQUEUE_SYSCTL=y
++# CONFIG_BSD_PROCESS_ACCT is not set
++# CONFIG_FHANDLE is not set
++# CONFIG_TASKSTATS is not set
++# CONFIG_AUDIT is not set
++CONFIG_HAVE_GENERIC_HARDIRQS=y
++
++#
++# IRQ subsystem
++#
++CONFIG_GENERIC_HARDIRQS=y
++CONFIG_HAVE_SPARSE_IRQ=y
++CONFIG_GENERIC_IRQ_SHOW=y
++CONFIG_GENERIC_IRQ_CHIP=y
++# CONFIG_SPARSE_IRQ is not set
++
++#
++# RCU Subsystem
++#
++CONFIG_TINY_RCU=y
++# CONFIG_PREEMPT_RCU is not set
++# CONFIG_RCU_TRACE is not set
++# CONFIG_TREE_RCU_TRACE is not set
++# CONFIG_IKCONFIG is not set
++CONFIG_LOG_BUF_SHIFT=17
++# CONFIG_CGROUPS is not set
++CONFIG_NAMESPACES=y
++CONFIG_UTS_NS=y
++CONFIG_IPC_NS=y
++CONFIG_USER_NS=y
++CONFIG_PID_NS=y
++CONFIG_NET_NS=y
++# CONFIG_SCHED_AUTOGROUP is not set
++# CONFIG_SYSFS_DEPRECATED is not set
++CONFIG_RELAY=y
++# CONFIG_BLK_DEV_INITRD is not set
++# CONFIG_CC_OPTIMIZE_FOR_SIZE is not set
++CONFIG_SYSCTL=y
++CONFIG_ANON_INODES=y
++# CONFIG_EXPERT is not set
++CONFIG_UID16=y
++CONFIG_SYSCTL_SYSCALL=y
++CONFIG_KALLSYMS=y
++# CONFIG_KALLSYMS_ALL is not set
++CONFIG_HOTPLUG=y
++CONFIG_PRINTK=y
++CONFIG_BUG=y
++CONFIG_ELF_CORE=y
++CONFIG_BASE_FULL=y
++CONFIG_FUTEX=y
++CONFIG_EPOLL=y
++CONFIG_SIGNALFD=y
++CONFIG_TIMERFD=y
++CONFIG_EVENTFD=y
++CONFIG_SHMEM=y
++CONFIG_AIO=y
++# CONFIG_EMBEDDED is not set
++CONFIG_HAVE_PERF_EVENTS=y
++CONFIG_PERF_USE_VMALLOC=y
++
++#
++# Kernel Performance Events And Counters
++#
++# CONFIG_PERF_EVENTS is not set
++# CONFIG_PERF_COUNTERS is not set
++CONFIG_VM_EVENT_COUNTERS=y
++CONFIG_SLUB_DEBUG=y
++# CONFIG_COMPAT_BRK is not set
++# CONFIG_SLAB is not set
++CONFIG_SLUB=y
++# CONFIG_PROFILING is not set
++CONFIG_HAVE_OPROFILE=y
++# CONFIG_KPROBES is not set
++CONFIG_HAVE_KPROBES=y
++CONFIG_HAVE_KRETPROBES=y
++CONFIG_HAVE_REGS_AND_STACK_ACCESS_API=y
++CONFIG_HAVE_CLK=y
++CONFIG_HAVE_DMA_API_DEBUG=y
++
++#
++# GCOV-based kernel profiling
++#
++# CONFIG_GCOV_KERNEL is not set
++CONFIG_HAVE_GENERIC_DMA_COHERENT=y
++CONFIG_SLABINFO=y
++CONFIG_RT_MUTEXES=y
++CONFIG_BASE_SMALL=0
++CONFIG_MODULES=y
++CONFIG_MODULE_FORCE_LOAD=y
++CONFIG_MODULE_UNLOAD=y
++CONFIG_MODULE_FORCE_UNLOAD=y
++# CONFIG_MODVERSIONS is not set
++# CONFIG_MODULE_SRCVERSION_ALL is not set
++CONFIG_BLOCK=y
++CONFIG_LBDAF=y
++# CONFIG_BLK_DEV_BSG is not set
++CONFIG_BLK_DEV_INTEGRITY=y
++
++#
++# IO Schedulers
++#
++CONFIG_IOSCHED_NOOP=y
++CONFIG_IOSCHED_DEADLINE=y
++CONFIG_IOSCHED_CFQ=y
++# CONFIG_DEFAULT_DEADLINE is not set
++CONFIG_DEFAULT_CFQ=y
++# CONFIG_DEFAULT_NOOP is not set
++CONFIG_DEFAULT_IOSCHED="cfq"
++# CONFIG_INLINE_SPIN_TRYLOCK is not set
++# CONFIG_INLINE_SPIN_TRYLOCK_BH is not set
++# CONFIG_INLINE_SPIN_LOCK is not set
++# CONFIG_INLINE_SPIN_LOCK_BH is not set
++# CONFIG_INLINE_SPIN_LOCK_IRQ is not set
++# CONFIG_INLINE_SPIN_LOCK_IRQSAVE is not set
++CONFIG_INLINE_SPIN_UNLOCK=y
++# CONFIG_INLINE_SPIN_UNLOCK_BH is not set
++CONFIG_INLINE_SPIN_UNLOCK_IRQ=y
++# CONFIG_INLINE_SPIN_UNLOCK_IRQRESTORE is not set
++# CONFIG_INLINE_READ_TRYLOCK is not set
++# CONFIG_INLINE_READ_LOCK is not set
++# CONFIG_INLINE_READ_LOCK_BH is not set
++# CONFIG_INLINE_READ_LOCK_IRQ is not set
++# CONFIG_INLINE_READ_LOCK_IRQSAVE is not set
++CONFIG_INLINE_READ_UNLOCK=y
++# CONFIG_INLINE_READ_UNLOCK_BH is not set
++CONFIG_INLINE_READ_UNLOCK_IRQ=y
++# CONFIG_INLINE_READ_UNLOCK_IRQRESTORE is not set
++# CONFIG_INLINE_WRITE_TRYLOCK is not set
++# CONFIG_INLINE_WRITE_LOCK is not set
++# CONFIG_INLINE_WRITE_LOCK_BH is not set
++# CONFIG_INLINE_WRITE_LOCK_IRQ is not set
++# CONFIG_INLINE_WRITE_LOCK_IRQSAVE is not set
++CONFIG_INLINE_WRITE_UNLOCK=y
++# CONFIG_INLINE_WRITE_UNLOCK_BH is not set
++CONFIG_INLINE_WRITE_UNLOCK_IRQ=y
++# CONFIG_INLINE_WRITE_UNLOCK_IRQRESTORE is not set
++# CONFIG_MUTEX_SPIN_ON_OWNER is not set
++CONFIG_FREEZER=y
++
++#
++# System Type
++#
++CONFIG_MMU=y
++# CONFIG_ARCH_INTEGRATOR is not set
++# CONFIG_ARCH_REALVIEW is not set
++# CONFIG_ARCH_VERSATILE is not set
++# CONFIG_ARCH_VEXPRESS is not set
++# CONFIG_ARCH_AT91 is not set
++# CONFIG_ARCH_BCMRING is not set
++# CONFIG_ARCH_CLPS711X is not set
++# CONFIG_ARCH_CNS3XXX is not set
++# CONFIG_ARCH_GEMINI is not set
++# CONFIG_ARCH_EBSA110 is not set
++# CONFIG_ARCH_EP93XX is not set
++# CONFIG_ARCH_FOOTBRIDGE is not set
++# CONFIG_ARCH_MXC is not set
++# CONFIG_ARCH_MXS is not set
++# CONFIG_ARCH_NETX is not set
++# CONFIG_ARCH_H720X is not set
++# CONFIG_ARCH_IOP13XX is not set
++# CONFIG_ARCH_IOP32X is not set
++# CONFIG_ARCH_IOP33X is not set
++# CONFIG_ARCH_IXP23XX is not set
++# CONFIG_ARCH_IXP2000 is not set
++# CONFIG_ARCH_IXP4XX is not set
++# CONFIG_ARCH_DOVE is not set
++# CONFIG_ARCH_KIRKWOOD is not set
++# CONFIG_ARCH_LOKI is not set
++# CONFIG_ARCH_LPC32XX is not set
++# CONFIG_ARCH_MV78XX0 is not set
++# CONFIG_ARCH_ORION5X is not set
++# CONFIG_ARCH_MMP is not set
++# CONFIG_ARCH_KS8695 is not set
++# CONFIG_ARCH_W90X900 is not set
++# CONFIG_ARCH_NUC93X is not set
++# CONFIG_ARCH_TEGRA is not set
++# CONFIG_ARCH_PNX4008 is not set
++# CONFIG_ARCH_PXA is not set
++# CONFIG_ARCH_MSM is not set
++# CONFIG_ARCH_SHMOBILE is not set
++# CONFIG_ARCH_RPC is not set
++# CONFIG_ARCH_SA1100 is not set
++CONFIG_ARCH_S3C2410=y
++# CONFIG_ARCH_S3C64XX is not set
++# CONFIG_ARCH_S5P64X0 is not set
++# CONFIG_ARCH_S5PC100 is not set
++# CONFIG_ARCH_S5PV210 is not set
++# CONFIG_ARCH_EXYNOS4 is not set
++# CONFIG_ARCH_SHARK is not set
++# CONFIG_ARCH_TCC_926 is not set
++# CONFIG_ARCH_U300 is not set
++# CONFIG_ARCH_U8500 is not set
++# CONFIG_ARCH_NOMADIK is not set
++# CONFIG_ARCH_DAVINCI is not set
++# CONFIG_ARCH_OMAP is not set
++# CONFIG_PLAT_SPEAR is not set
++# CONFIG_ARCH_VT8500 is not set
++# CONFIG_GPIO_PCA953X is not set
++# CONFIG_KEYBOARD_GPIO_POLLED is not set
++CONFIG_PLAT_SAMSUNG=y
++
++#
++# Boot options
++#
++# CONFIG_S3C_BOOT_WATCHDOG is not set
++# CONFIG_S3C_BOOT_ERROR_RESET is not set
++CONFIG_S3C_BOOT_UART_FORCE_FIFO=y
++CONFIG_S3C_LOWLEVEL_UART_PORT=0
++CONFIG_S3C_GPIO_CFG_S3C24XX=y
++CONFIG_S3C_GPIO_PULL_UP=y
++CONFIG_SAMSUNG_GPIO_EXTRA=0
++CONFIG_S3C_GPIO_SPACE=0
++CONFIG_S3C_ADC=y
++CONFIG_S3C_DEV_USB_HOST=y
++CONFIG_S3C_DEV_WDT=y
++CONFIG_S3C_DEV_NAND=y
++CONFIG_SAMSUNG_DEV_PWM=y
++CONFIG_S3C24XX_PWM=y
++CONFIG_S3C_DMA=y
++
++#
++# Power management
++#
++# CONFIG_SAMSUNG_PM_DEBUG is not set
++# CONFIG_SAMSUNG_PM_CHECK is not set
++
++#
++# Power Domain
++#
++CONFIG_PLAT_S3C24XX=y
++CONFIG_CPU_LLSERIAL_S3C2440_ONLY=y
++CONFIG_CPU_LLSERIAL_S3C2440=y
++CONFIG_S3C2410_CLOCK=y
++CONFIG_S3C24XX_GPIO_EXTRA=0
++CONFIG_S3C2410_DMA=y
++# CONFIG_S3C2410_DMA_DEBUG is not set
++CONFIG_MACH_SMDK=y
++
++#
++# System MMU
++#
++
++#
++# S3C2400 Machines
++#
++CONFIG_S3C2410_PM=y
++CONFIG_S3C2410_GPIO=y
++
++#
++# S3C2410 Machines
++#
++# CONFIG_ARCH_SMDK2410 is not set
++# CONFIG_ARCH_H1940 is not set
++# CONFIG_MACH_N30 is not set
++# CONFIG_ARCH_BAST is not set
++# CONFIG_MACH_OTOM is not set
++# CONFIG_MACH_AML_M5900 is not set
++# CONFIG_MACH_TCT_HAMMER is not set
++# CONFIG_MACH_VR1000 is not set
++# CONFIG_MACH_QT2410 is not set
++
++#
++# S3C2412 Machines
++#
++# CONFIG_MACH_JIVE is not set
++# CONFIG_MACH_SMDK2413 is not set
++# CONFIG_MACH_SMDK2412 is not set
++# CONFIG_MACH_VSTMS is not set
++
++#
++# S3C2416 Machines
++#
++# CONFIG_MACH_SMDK2416 is not set
++CONFIG_CPU_S3C2440=y
++CONFIG_CPU_S3C244X=y
++CONFIG_S3C2440_XTAL_16934400=y
++CONFIG_S3C2440_DMA=y
++
++#
++# S3C2440 and S3C2442 Machines
++#
++# CONFIG_MACH_ANUBIS is not set
++# CONFIG_MACH_NEO1973_GTA02 is not set
++# CONFIG_MACH_OSIRIS is not set
++# CONFIG_MACH_RX3715 is not set
++CONFIG_ARCH_S3C2440=y
++# CONFIG_MACH_NEXCODER_2440 is not set
++CONFIG_SMDK2440_CPU2440=y
++# CONFIG_SMDK2440_CPU2442 is not set
++# CONFIG_MACH_AT2440EVB is not set
++# CONFIG_MACH_MINI2440 is not set
++# CONFIG_MACH_RX1950 is not set
++
++#
++# S3C2443 Machines
++#
++# CONFIG_MACH_SMDK2443 is not set
++
++#
++# Processor Type
++#
++CONFIG_CPU_ARM920T=y
++CONFIG_CPU_32v4T=y
++CONFIG_CPU_ABRT_EV4T=y
++CONFIG_CPU_PABRT_LEGACY=y
++CONFIG_CPU_CACHE_V4WT=y
++CONFIG_CPU_CACHE_VIVT=y
++CONFIG_CPU_COPY_V4WB=y
++CONFIG_CPU_TLB_V4WBI=y
++CONFIG_CPU_CP15=y
++CONFIG_CPU_CP15_MMU=y
++CONFIG_CPU_USE_DOMAINS=y
++
++#
++# Processor Features
++#
++CONFIG_ARM_THUMB=y
++# CONFIG_CPU_ICACHE_DISABLE is not set
++# CONFIG_CPU_DCACHE_DISABLE is not set
++# CONFIG_CPU_DCACHE_WRITETHROUGH is not set
++CONFIG_ARM_L1_CACHE_SHIFT=5
++
++#
++# Bus support
++#
++# CONFIG_PCI_SYSCALL is not set
++# CONFIG_ARCH_SUPPORTS_MSI is not set
++# CONFIG_PCCARD is not set
++
++#
++# Kernel Features
++#
++CONFIG_VMSPLIT_3G=y
++# CONFIG_VMSPLIT_2G is not set
++# CONFIG_VMSPLIT_1G is not set
++CONFIG_PAGE_OFFSET=0xC0000000
++CONFIG_PREEMPT_NONE=y
++# CONFIG_PREEMPT_VOLUNTARY is not set
++# CONFIG_PREEMPT is not set
++CONFIG_HZ=200
++CONFIG_AEABI=y
++# CONFIG_OABI_COMPAT is not set
++# CONFIG_ARCH_SPARSEMEM_DEFAULT is not set
++# CONFIG_ARCH_SELECT_MEMORY_MODEL is not set
++CONFIG_HAVE_ARCH_PFN_VALID=y
++# CONFIG_HIGHMEM is not set
++CONFIG_SELECT_MEMORY_MODEL=y
++CONFIG_FLATMEM_MANUAL=y
++CONFIG_FLATMEM=y
++CONFIG_FLAT_NODE_MEM_MAP=y
++CONFIG_HAVE_MEMBLOCK=y
++CONFIG_PAGEFLAGS_EXTENDED=y
++CONFIG_SPLIT_PTLOCK_CPUS=999999
++# CONFIG_COMPACTION is not set
++# CONFIG_PHYS_ADDR_T_64BIT is not set
++CONFIG_ZONE_DMA_FLAG=0
++CONFIG_VIRT_TO_BUS=y
++# CONFIG_KSM is not set
++CONFIG_DEFAULT_MMAP_MIN_ADDR=4096
++CONFIG_NEED_PER_CPU_KM=y
++# CONFIG_CLEANCACHE is not set
++CONFIG_FORCE_MAX_ZONEORDER=11
++CONFIG_ALIGNMENT_TRAP=y
++# CONFIG_UACCESS_WITH_MEMCPY is not set
++# CONFIG_SECCOMP is not set
++# CONFIG_CC_STACKPROTECTOR is not set
++# CONFIG_DEPRECATED_PARAM_STRUCT is not set
++
++#
++# Boot options
++#
++# CONFIG_USE_OF is not set
++CONFIG_ZBOOT_ROM_TEXT=0
++CONFIG_ZBOOT_ROM_BSS=0
++CONFIG_CMDLINE=""
++# CONFIG_XIP_KERNEL is not set
++CONFIG_KEXEC=y
++CONFIG_ATAGS_PROC=y
++# CONFIG_CRASH_DUMP is not set
++# CONFIG_AUTO_ZRELADDR is not set
++
++#
++# CPU Power Management
++#
++
++#
++# CPU Frequency scaling
++#
++# CONFIG_CPU_FREQ is not set
++CONFIG_CPU_IDLE=y
++CONFIG_CPU_IDLE_GOV_LADDER=y
++
++#
++# Floating point emulation
++#
++
++#
++# At least one emulation must be selected
++#
++
++#
++# Userspace binary formats
++#
++CONFIG_BINFMT_ELF=y
++CONFIG_CORE_DUMP_DEFAULT_ELF_HEADERS=y
++CONFIG_HAVE_AOUT=y
++CONFIG_BINFMT_AOUT=m
++CONFIG_BINFMT_MISC=m
++
++#
++# Power management options
++#
++CONFIG_SUSPEND=y
++CONFIG_SUSPEND_FREEZER=y
++CONFIG_PM_SLEEP=y
++# CONFIG_PM_RUNTIME is not set
++CONFIG_PM=y
++# CONFIG_PM_DEBUG is not set
++CONFIG_APM_EMULATION=y
++CONFIG_ARCH_SUSPEND_POSSIBLE=y
++CONFIG_NET=y
++
++#
++# Networking options
++#
++CONFIG_PACKET=y
++CONFIG_UNIX=y
++CONFIG_XFRM=y
++CONFIG_XFRM_USER=m
++# CONFIG_XFRM_SUB_POLICY is not set
++# CONFIG_XFRM_MIGRATE is not set
++# CONFIG_XFRM_STATISTICS is not set
++CONFIG_NET_KEY=m
++# CONFIG_NET_KEY_MIGRATE is not set
++CONFIG_INET=y
++CONFIG_IP_MULTICAST=y
++CONFIG_IP_ADVANCED_ROUTER=y
++# CONFIG_IP_FIB_TRIE_STATS is not set
++CONFIG_IP_MULTIPLE_TABLES=y
++CONFIG_IP_ROUTE_MULTIPATH=y
++CONFIG_IP_ROUTE_VERBOSE=y
++CONFIG_IP_PNP=y
++CONFIG_IP_PNP_DHCP=y
++CONFIG_IP_PNP_BOOTP=y
++CONFIG_IP_PNP_RARP=y
++# CONFIG_NET_IPIP is not set
++# CONFIG_NET_IPGRE_DEMUX is not set
++CONFIG_IP_MROUTE=y
++# CONFIG_IP_MROUTE_MULTIPLE_TABLES is not set
++CONFIG_IP_PIMSM_V1=y
++CONFIG_IP_PIMSM_V2=y
++# CONFIG_ARPD is not set
++CONFIG_SYN_COOKIES=y
++# CONFIG_INET_AH is not set
++# CONFIG_INET_ESP is not set
++# CONFIG_INET_IPCOMP is not set
++# CONFIG_INET_XFRM_TUNNEL is not set
++# CONFIG_INET_TUNNEL is not set
++# CONFIG_INET_XFRM_MODE_TRANSPORT is not set
++# CONFIG_INET_XFRM_MODE_TUNNEL is not set
++# CONFIG_INET_XFRM_MODE_BEET is not set
++# CONFIG_INET_LRO is not set
++CONFIG_INET_DIAG=m
++CONFIG_INET_TCP_DIAG=m
++# CONFIG_TCP_CONG_ADVANCED is not set
++CONFIG_TCP_CONG_CUBIC=y
++CONFIG_DEFAULT_TCP_CONG="cubic"
++# CONFIG_TCP_MD5SIG is not set
++# CONFIG_IPV6 is not set
++# CONFIG_NETWORK_SECMARK is not set
++# CONFIG_NETWORK_PHY_TIMESTAMPING is not set
++CONFIG_NETFILTER=y
++# CONFIG_NETFILTER_DEBUG is not set
++CONFIG_NETFILTER_ADVANCED=y
++CONFIG_BRIDGE_NETFILTER=y
++
++#
++# Core Netfilter Configuration
++#
++# CONFIG_NETFILTER_NETLINK_QUEUE is not set
++# CONFIG_NETFILTER_NETLINK_LOG is not set
++# CONFIG_NF_CONNTRACK is not set
++# CONFIG_NETFILTER_XTABLES is not set
++# CONFIG_IP_VS is not set
++
++#
++# IP: Netfilter Configuration
++#
++# CONFIG_NF_DEFRAG_IPV4 is not set
++# CONFIG_IP_NF_QUEUE is not set
++# CONFIG_IP_NF_IPTABLES is not set
++# CONFIG_IP_NF_ARPTABLES is not set
++# CONFIG_BRIDGE_NF_EBTABLES is not set
++# CONFIG_IP_DCCP is not set
++# CONFIG_IP_SCTP is not set
++# CONFIG_RDS is not set
++# CONFIG_TIPC is not set
++# CONFIG_ATM is not set
++# CONFIG_L2TP is not set
++CONFIG_STP=m
++CONFIG_GARP=m
++CONFIG_BRIDGE=m
++CONFIG_BRIDGE_IGMP_SNOOPING=y
++# CONFIG_NET_DSA is not set
++CONFIG_VLAN_8021Q=m
++CONFIG_VLAN_8021Q_GVRP=y
++# CONFIG_DECNET is not set
++CONFIG_LLC=m
++# CONFIG_LLC2 is not set
++# CONFIG_IPX is not set
++# CONFIG_ATALK is not set
++# CONFIG_X25 is not set
++# CONFIG_LAPB is not set
++# CONFIG_ECONET is not set
++# CONFIG_WAN_ROUTER is not set
++# CONFIG_PHONET is not set
++# CONFIG_IEEE802154 is not set
++# CONFIG_NET_SCHED is not set
++# CONFIG_DCB is not set
++CONFIG_DNS_RESOLVER=y
++# CONFIG_BATMAN_ADV is not set
++
++#
++# Network testing
++#
++CONFIG_NET_PKTGEN=m
++# CONFIG_HAMRADIO is not set
++# CONFIG_CAN is not set
++# CONFIG_IRDA is not set
++CONFIG_BT=m
++# CONFIG_BT_L2CAP is not set
++# CONFIG_BT_SCO is not set
++
++#
++# Bluetooth device drivers
++#
++CONFIG_BT_HCIBTUSB=m
++CONFIG_BT_HCIBTSDIO=m
++CONFIG_BT_HCIUART=m
++CONFIG_BT_HCIUART_H4=y
++CONFIG_BT_HCIUART_BCSP=y
++# CONFIG_BT_HCIUART_ATH3K is not set
++CONFIG_BT_HCIUART_LL=y
++CONFIG_BT_HCIBCM203X=m
++CONFIG_BT_HCIBPA10X=m
++CONFIG_BT_HCIBFUSB=m
++CONFIG_BT_HCIVHCI=m
++# CONFIG_BT_MRVL is not set
++# CONFIG_BT_ATH3K is not set
++# CONFIG_AF_RXRPC is not set
++CONFIG_FIB_RULES=y
++CONFIG_WIRELESS=y
++CONFIG_WIRELESS_EXT=y
++CONFIG_WEXT_CORE=y
++CONFIG_WEXT_PROC=y
++CONFIG_WEXT_SPY=y
++CONFIG_WEXT_PRIV=y
++CONFIG_CFG80211=m
++# CONFIG_NL80211_TESTMODE is not set
++# CONFIG_CFG80211_DEVELOPER_WARNINGS is not set
++CONFIG_CFG80211_REG_DEBUG=y
++CONFIG_CFG80211_DEFAULT_PS=y
++# CONFIG_CFG80211_DEBUGFS is not set
++# CONFIG_CFG80211_INTERNAL_REGDB is not set
++CONFIG_CFG80211_WEXT=y
++CONFIG_WIRELESS_EXT_SYSFS=y
++CONFIG_LIB80211=m
++CONFIG_LIB80211_CRYPT_WEP=m
++CONFIG_LIB80211_CRYPT_CCMP=m
++CONFIG_LIB80211_CRYPT_TKIP=m
++# CONFIG_LIB80211_DEBUG is not set
++CONFIG_MAC80211=m
++CONFIG_MAC80211_HAS_RC=y
++CONFIG_MAC80211_RC_MINSTREL=y
++CONFIG_MAC80211_RC_MINSTREL_HT=y
++CONFIG_MAC80211_RC_DEFAULT_MINSTREL=y
++CONFIG_MAC80211_RC_DEFAULT="minstrel_ht"
++CONFIG_MAC80211_MESH=y
++CONFIG_MAC80211_LEDS=y
++# CONFIG_MAC80211_DEBUGFS is not set
++# CONFIG_MAC80211_DEBUG_MENU is not set
++# CONFIG_WIMAX is not set
++# CONFIG_RFKILL is not set
++# CONFIG_NET_9P is not set
++# CONFIG_CAIF is not set
++# CONFIG_CEPH_LIB is not set
++
++#
++# Device Drivers
++#
++
++#
++# Generic Driver Options
++#
++CONFIG_UEVENT_HELPER_PATH="/sbin/hotplug"
++# CONFIG_DEVTMPFS is not set
++CONFIG_STANDALONE=y
++CONFIG_PREVENT_FIRMWARE_BUILD=y
++CONFIG_FW_LOADER=y
++# CONFIG_FIRMWARE_IN_KERNEL is not set
++CONFIG_EXTRA_FIRMWARE=""
++# CONFIG_DEBUG_DRIVER is not set
++# CONFIG_DEBUG_DEVRES is not set
++# CONFIG_SYS_HYPERVISOR is not set
++CONFIG_CONNECTOR=m
++CONFIG_MTD=y
++# CONFIG_MTD_DEBUG is not set
++# CONFIG_MTD_TESTS is not set
++# CONFIG_MTD_REDBOOT_PARTS is not set
++CONFIG_MTD_CMDLINE_PARTS=y
++# CONFIG_MTD_AFS_PARTS is not set
++# CONFIG_MTD_AR7_PARTS is not set
++
++#
++# User Modules And Translation Layers
++#
++CONFIG_MTD_CHAR=y
++CONFIG_MTD_BLKDEVS=y
++CONFIG_MTD_BLOCK=y
++# CONFIG_FTL is not set
++# CONFIG_NFTL is not set
++# CONFIG_INFTL is not set
++CONFIG_RFD_FTL=y
++# CONFIG_SSFDC is not set
++# CONFIG_SM_FTL is not set
++# CONFIG_MTD_OOPS is not set
++# CONFIG_MTD_SWAP is not set
++
++#
++# RAM/ROM/Flash chip drivers
++#
++CONFIG_MTD_CFI=y
++CONFIG_MTD_JEDECPROBE=y
++CONFIG_MTD_GEN_PROBE=y
++# CONFIG_MTD_CFI_ADV_OPTIONS is not set
++CONFIG_MTD_MAP_BANK_WIDTH_1=y
++CONFIG_MTD_MAP_BANK_WIDTH_2=y
++CONFIG_MTD_MAP_BANK_WIDTH_4=y
++# CONFIG_MTD_MAP_BANK_WIDTH_8 is not set
++# CONFIG_MTD_MAP_BANK_WIDTH_16 is not set
++# CONFIG_MTD_MAP_BANK_WIDTH_32 is not set
++CONFIG_MTD_CFI_I1=y
++CONFIG_MTD_CFI_I2=y
++# CONFIG_MTD_CFI_I4 is not set
++# CONFIG_MTD_CFI_I8 is not set
++# CONFIG_MTD_CFI_INTELEXT is not set
++CONFIG_MTD_CFI_AMDSTD=y
++CONFIG_MTD_CFI_STAA=y
++CONFIG_MTD_CFI_UTIL=y
++CONFIG_MTD_RAM=y
++CONFIG_MTD_ROM=y
++# CONFIG_MTD_ABSENT is not set
++
++#
++# Mapping drivers for chip access
++#
++# CONFIG_MTD_COMPLEX_MAPPINGS is not set
++# CONFIG_MTD_PHYSMAP is not set
++# CONFIG_MTD_ARM_INTEGRATOR is not set
++# CONFIG_MTD_IMPA7 is not set
++# CONFIG_MTD_PLATRAM is not set
++
++#
++# Self-contained MTD device drivers
++#
++# CONFIG_MTD_DATAFLASH is not set
++# CONFIG_MTD_M25P80 is not set
++# CONFIG_MTD_SST25L is not set
++# CONFIG_MTD_SLRAM is not set
++# CONFIG_MTD_PHRAM is not set
++# CONFIG_MTD_MTDRAM is not set
++# CONFIG_MTD_BLOCK2MTD is not set
++
++#
++# Disk-On-Chip Device Drivers
++#
++# CONFIG_MTD_DOC2000 is not set
++# CONFIG_MTD_DOC2001 is not set
++# CONFIG_MTD_DOC2001PLUS is not set
++CONFIG_MTD_NAND_ECC=y
++# CONFIG_MTD_NAND_ECC_SMC is not set
++CONFIG_MTD_NAND=y
++CONFIG_MTD_NAND_VERIFY_WRITE=y
++# CONFIG_MTD_NAND_ECC_BCH is not set
++# CONFIG_MTD_SM_COMMON is not set
++# CONFIG_MTD_NAND_MUSEUM_IDS is not set
++# CONFIG_MTD_NAND_GPIO is not set
++CONFIG_MTD_NAND_IDS=y
++CONFIG_MTD_NAND_S3C2410=y
++# CONFIG_MTD_NAND_S3C2410_DEBUG is not set
++# CONFIG_MTD_NAND_S3C2410_HWECC is not set
++# CONFIG_MTD_NAND_S3C2410_CLKSTOP is not set
++# CONFIG_MTD_NAND_DISKONCHIP is not set
++# CONFIG_MTD_NAND_NANDSIM is not set
++CONFIG_MTD_NAND_PLATFORM=y
++# CONFIG_MTD_ALAUDA is not set
++# CONFIG_MTD_ONENAND is not set
++
++#
++# LPDDR flash memory drivers
++#
++CONFIG_MTD_LPDDR=y
++CONFIG_MTD_QINFO_PROBE=y
++CONFIG_MTD_UBI=y
++CONFIG_MTD_UBI_WL_THRESHOLD=4096
++CONFIG_MTD_UBI_BEB_RESERVE=1
++# CONFIG_MTD_UBI_GLUEBI is not set
++# CONFIG_MTD_UBI_DEBUG is not set
++# CONFIG_PARPORT is not set
++CONFIG_BLK_DEV=y
++# CONFIG_BLK_DEV_COW_COMMON is not set
++CONFIG_BLK_DEV_LOOP=m
++# CONFIG_BLK_DEV_CRYPTOLOOP is not set
++# CONFIG_BLK_DEV_DRBD is not set
++CONFIG_BLK_DEV_NBD=m
++# CONFIG_BLK_DEV_UB is not set
++CONFIG_BLK_DEV_RAM=y
++CONFIG_BLK_DEV_RAM_COUNT=16
++CONFIG_BLK_DEV_RAM_SIZE=65536
++# CONFIG_BLK_DEV_XIP is not set
++CONFIG_CDROM_PKTCDVD=m
++CONFIG_CDROM_PKTCDVD_BUFFERS=8
++# CONFIG_CDROM_PKTCDVD_WCACHE is not set
++# CONFIG_ATA_OVER_ETH is not set
++# CONFIG_MG_DISK is not set
++# CONFIG_BLK_DEV_RBD is not set
++# CONFIG_SENSORS_LIS3LV02D is not set
++# CONFIG_MISC_DEVICES is not set
++CONFIG_HAVE_IDE=y
++# CONFIG_IDE is not set
++
++#
++# SCSI device support
++#
++CONFIG_SCSI_MOD=m
++# CONFIG_RAID_ATTRS is not set
++CONFIG_SCSI=m
++CONFIG_SCSI_DMA=y
++# CONFIG_SCSI_TGT is not set
++# CONFIG_SCSI_NETLINK is not set
++# CONFIG_SCSI_PROC_FS is not set
++
++#
++# SCSI support type (disk, tape, CD-ROM)
++#
++CONFIG_BLK_DEV_SD=m
++# CONFIG_CHR_DEV_ST is not set
++# CONFIG_CHR_DEV_OSST is not set
++# CONFIG_BLK_DEV_SR is not set
++CONFIG_CHR_DEV_SG=m
++# CONFIG_CHR_DEV_SCH is not set
++# CONFIG_SCSI_MULTI_LUN is not set
++# CONFIG_SCSI_CONSTANTS is not set
++# CONFIG_SCSI_LOGGING is not set
++# CONFIG_SCSI_SCAN_ASYNC is not set
++CONFIG_SCSI_WAIT_SCAN=m
++
++#
++# SCSI Transports
++#
++# CONFIG_SCSI_SPI_ATTRS is not set
++# CONFIG_SCSI_FC_ATTRS is not set
++# CONFIG_SCSI_ISCSI_ATTRS is not set
++# CONFIG_SCSI_SAS_ATTRS is not set
++# CONFIG_SCSI_SAS_LIBSAS is not set
++# CONFIG_SCSI_SRP_ATTRS is not set
++# CONFIG_SCSI_LOWLEVEL is not set
++# CONFIG_SCSI_DH is not set
++# CONFIG_SCSI_OSD_INITIATOR is not set
++# CONFIG_ATA is not set
++# CONFIG_MD is not set
++# CONFIG_TARGET_CORE is not set
++CONFIG_NETDEVICES=y
++# CONFIG_DUMMY is not set
++# CONFIG_BONDING is not set
++# CONFIG_MACVLAN is not set
++# CONFIG_EQUALIZER is not set
++CONFIG_TUN=m
++# CONFIG_VETH is not set
++CONFIG_MII=y
++# CONFIG_PHYLIB is not set
++CONFIG_NET_ETHERNET=y
++# CONFIG_AX88796 is not set
++# CONFIG_SMC91X is not set
++CONFIG_DM9000=y
++CONFIG_DM9000_DEBUGLEVEL=4
++# CONFIG_DM9000_FORCE_SIMPLE_PHY_POLL is not set
++# CONFIG_ENC28J60 is not set
++# CONFIG_ETHOC is not set
++# CONFIG_SMC911X is not set
++# CONFIG_SMSC911X is not set
++# CONFIG_DNET is not set
++# CONFIG_IBM_NEW_EMAC_ZMII is not set
++# CONFIG_IBM_NEW_EMAC_RGMII is not set
++# CONFIG_IBM_NEW_EMAC_TAH is not set
++# CONFIG_IBM_NEW_EMAC_EMAC4 is not set
++# CONFIG_IBM_NEW_EMAC_NO_FLOW_CTRL is not set
++# CONFIG_IBM_NEW_EMAC_MAL_CLR_ICINTSTAT is not set
++# CONFIG_IBM_NEW_EMAC_MAL_COMMON_ERR is not set
++# CONFIG_B44 is not set
++# CONFIG_KS8851 is not set
++# CONFIG_KS8851_MLL is not set
++# CONFIG_FTMAC100 is not set
++# CONFIG_NETDEV_1000 is not set
++# CONFIG_NETDEV_10000 is not set
++CONFIG_WLAN=y
++# CONFIG_LIBERTAS_THINFIRM is not set
++# CONFIG_AT76C50X_USB is not set
++# CONFIG_USB_ZD1201 is not set
++# CONFIG_USB_NET_RNDIS_WLAN is not set
++# CONFIG_RTL8187 is not set
++# CONFIG_MAC80211_HWSIM is not set
++# CONFIG_ATH_COMMON is not set
++# CONFIG_B43 is not set
++# CONFIG_B43LEGACY is not set
++CONFIG_HOSTAP=m
++CONFIG_HOSTAP_FIRMWARE=y
++CONFIG_HOSTAP_FIRMWARE_NVRAM=y
++# CONFIG_IWM is not set
++CONFIG_LIBERTAS=m
++# CONFIG_LIBERTAS_USB is not set
++CONFIG_LIBERTAS_SDIO=m
++# CONFIG_LIBERTAS_SPI is not set
++# CONFIG_LIBERTAS_DEBUG is not set
++# CONFIG_LIBERTAS_MESH is not set
++# CONFIG_P54_COMMON is not set
++# CONFIG_RT2X00 is not set
++# CONFIG_RTL8192SE is not set
++# CONFIG_RTL8192CU is not set
++# CONFIG_WL1251 is not set
++# CONFIG_WL12XX_MENU is not set
++CONFIG_ZD1211RW=m
++CONFIG_ZD1211RW_DEBUG=y
++# CONFIG_MWIFIEX is not set
++
++#
++# Enable WiMAX (Networking options) to see the WiMAX drivers
++#
++
++#
++# USB Network Adapters
++#
++# CONFIG_USB_CATC is not set
++# CONFIG_USB_KAWETH is not set
++# CONFIG_USB_PEGASUS is not set
++# CONFIG_USB_RTL8150 is not set
++# CONFIG_USB_USBNET is not set
++# CONFIG_USB_IPHETH is not set
++# CONFIG_WAN is not set
++
++#
++# CAIF transport drivers
++#
++CONFIG_PPP=m
++CONFIG_PPP_MULTILINK=y
++CONFIG_PPP_FILTER=y
++CONFIG_PPP_ASYNC=m
++CONFIG_PPP_SYNC_TTY=m
++CONFIG_PPP_DEFLATE=m
++CONFIG_PPP_BSDCOMP=m
++CONFIG_PPP_MPPE=m
++# CONFIG_PPPOE is not set
++# CONFIG_SLIP is not set
++CONFIG_SLHC=m
++# CONFIG_NETCONSOLE is not set
++# CONFIG_NETPOLL is not set
++# CONFIG_NET_POLL_CONTROLLER is not set
++# CONFIG_ISDN is not set
++# CONFIG_PHONE is not set
++
++#
++# Input device support
++#
++CONFIG_INPUT=y
++CONFIG_INPUT_FF_MEMLESS=y
++# CONFIG_INPUT_POLLDEV is not set
++# CONFIG_INPUT_SPARSEKMAP is not set
++
++#
++# Userland interfaces
++#
++CONFIG_INPUT_MOUSEDEV=y
++CONFIG_INPUT_MOUSEDEV_PSAUX=y
++CONFIG_INPUT_MOUSEDEV_SCREEN_X=1024
++CONFIG_INPUT_MOUSEDEV_SCREEN_Y=768
++# CONFIG_INPUT_JOYDEV is not set
++CONFIG_INPUT_EVDEV=y
++CONFIG_INPUT_EVBUG=m
++
++#
++# Input Device Drivers
++#
++CONFIG_INPUT_KEYBOARD=y
++# CONFIG_KEYBOARD_ADP5588 is not set
++# CONFIG_KEYBOARD_ADP5589 is not set
++# CONFIG_KEYBOARD_ATKBD is not set
++# CONFIG_KEYBOARD_QT1070 is not set
++# CONFIG_KEYBOARD_QT2160 is not set
++# CONFIG_KEYBOARD_LKKBD is not set
++CONFIG_KEYBOARD_GPIO=y
++# CONFIG_KEYBOARD_TCA6416 is not set
++# CONFIG_KEYBOARD_MATRIX is not set
++# CONFIG_KEYBOARD_LM8323 is not set
++# CONFIG_KEYBOARD_MAX7359 is not set
++# CONFIG_KEYBOARD_MCS is not set
++# CONFIG_KEYBOARD_MPR121 is not set
++# CONFIG_KEYBOARD_NEWTON is not set
++# CONFIG_KEYBOARD_OPENCORES is not set
++# CONFIG_KEYBOARD_STOWAWAY is not set
++# CONFIG_KEYBOARD_SUNKBD is not set
++# CONFIG_KEYBOARD_XTKBD is not set
++CONFIG_INPUT_MOUSE=y
++CONFIG_MOUSE_PS2=y
++CONFIG_MOUSE_PS2_ALPS=y
++CONFIG_MOUSE_PS2_LOGIPS2PP=y
++CONFIG_MOUSE_PS2_SYNAPTICS=y
++CONFIG_MOUSE_PS2_TRACKPOINT=y
++# CONFIG_MOUSE_PS2_ELANTECH is not set
++# CONFIG_MOUSE_PS2_SENTELIC is not set
++# CONFIG_MOUSE_PS2_TOUCHKIT is not set
++# CONFIG_MOUSE_SERIAL is not set
++# CONFIG_MOUSE_APPLETOUCH is not set
++# CONFIG_MOUSE_BCM5974 is not set
++# CONFIG_MOUSE_VSXXXAA is not set
++# CONFIG_MOUSE_GPIO is not set
++# CONFIG_MOUSE_SYNAPTICS_I2C is not set
++# CONFIG_INPUT_JOYSTICK is not set
++# CONFIG_INPUT_TABLET is not set
++CONFIG_INPUT_TOUCHSCREEN=y
++# CONFIG_TOUCHSCREEN_ADS7846 is not set
++# CONFIG_TOUCHSCREEN_AD7877 is not set
++# CONFIG_TOUCHSCREEN_AD7879 is not set
++# CONFIG_TOUCHSCREEN_ATMEL_MXT is not set
++# CONFIG_TOUCHSCREEN_BU21013 is not set
++# CONFIG_TOUCHSCREEN_CY8CTMG110 is not set
++# CONFIG_TOUCHSCREEN_DYNAPRO is not set
++# CONFIG_TOUCHSCREEN_HAMPSHIRE is not set
++# CONFIG_TOUCHSCREEN_EETI is not set
++# CONFIG_TOUCHSCREEN_FUJITSU is not set
++# CONFIG_TOUCHSCREEN_S3C2410 is not set
++# CONFIG_TOUCHSCREEN_GUNZE is not set
++# CONFIG_TOUCHSCREEN_ELO is not set
++# CONFIG_TOUCHSCREEN_WACOM_W8001 is not set
++# CONFIG_TOUCHSCREEN_MAX11801 is not set
++# CONFIG_TOUCHSCREEN_MCS5000 is not set
++# CONFIG_TOUCHSCREEN_MTOUCH is not set
++# CONFIG_TOUCHSCREEN_INEXIO is not set
++# CONFIG_TOUCHSCREEN_MK712 is not set
++# CONFIG_TOUCHSCREEN_PENMOUNT is not set
++# CONFIG_TOUCHSCREEN_TOUCHRIGHT is not set
++# CONFIG_TOUCHSCREEN_TOUCHWIN is not set
++# CONFIG_TOUCHSCREEN_USB_COMPOSITE is not set
++# CONFIG_TOUCHSCREEN_TOUCHIT213 is not set
++# CONFIG_TOUCHSCREEN_TSC2005 is not set
++# CONFIG_TOUCHSCREEN_TSC2007 is not set
++# CONFIG_TOUCHSCREEN_W90X900 is not set
++# CONFIG_TOUCHSCREEN_ST1232 is not set
++# CONFIG_TOUCHSCREEN_TPS6507X is not set
++CONFIG_INPUT_MISC=y
++# CONFIG_INPUT_AD714X is not set
++# CONFIG_INPUT_ATI_REMOTE is not set
++# CONFIG_INPUT_ATI_REMOTE2 is not set
++# CONFIG_INPUT_KEYSPAN_REMOTE is not set
++# CONFIG_INPUT_POWERMATE is not set
++# CONFIG_INPUT_YEALINK is not set
++# CONFIG_INPUT_CM109 is not set
++# CONFIG_INPUT_UINPUT is not set
++# CONFIG_INPUT_PCF8574 is not set
++CONFIG_INPUT_PWM_BEEPER=y
++# CONFIG_INPUT_GPIO_ROTARY_ENCODER is not set
++# CONFIG_INPUT_ADXL34X is not set
++# CONFIG_INPUT_CMA3000 is not set
++
++#
++# Hardware I/O ports
++#
++CONFIG_SERIO=y
++CONFIG_SERIO_SERPORT=y
++CONFIG_SERIO_LIBPS2=y
++CONFIG_SERIO_RAW=y
++# CONFIG_SERIO_ALTERA_PS2 is not set
++# CONFIG_SERIO_PS2MULT is not set
++# CONFIG_GAMEPORT is not set
++
++#
++# Character devices
++#
++CONFIG_VT=y
++CONFIG_CONSOLE_TRANSLATIONS=y
++CONFIG_VT_CONSOLE=y
++CONFIG_HW_CONSOLE=y
++CONFIG_VT_HW_CONSOLE_BINDING=y
++CONFIG_UNIX98_PTYS=y
++# CONFIG_DEVPTS_MULTIPLE_INSTANCES is not set
++CONFIG_LEGACY_PTYS=y
++CONFIG_LEGACY_PTY_COUNT=128
++# CONFIG_SERIAL_NONSTANDARD is not set
++# CONFIG_N_GSM is not set
++# CONFIG_TRACE_SINK is not set
++CONFIG_DEVKMEM=y
++
++#
++# Serial drivers
++#
++# CONFIG_SERIAL_8250 is not set
++
++#
++# Non-8250 serial port support
++#
++CONFIG_SERIAL_SAMSUNG=y
++CONFIG_SERIAL_SAMSUNG_UARTS=3
++CONFIG_SERIAL_SAMSUNG_CONSOLE=y
++CONFIG_SERIAL_S3C2440=y
++# CONFIG_SERIAL_MAX3100 is not set
++# CONFIG_SERIAL_MAX3107 is not set
++CONFIG_SERIAL_CORE=y
++CONFIG_SERIAL_CORE_CONSOLE=y
++# CONFIG_SERIAL_TIMBERDALE is not set
++# CONFIG_SERIAL_ALTERA_JTAGUART is not set
++# CONFIG_SERIAL_ALTERA_UART is not set
++# CONFIG_SERIAL_IFX6X60 is not set
++# CONFIG_SERIAL_XILINX_PS_UART is not set
++# CONFIG_HVC_DCC is not set
++CONFIG_IPMI_HANDLER=m
++# CONFIG_IPMI_PANIC_EVENT is not set
++CONFIG_IPMI_DEVICE_INTERFACE=m
++CONFIG_IPMI_SI=m
++CONFIG_IPMI_WATCHDOG=m
++CONFIG_IPMI_POWEROFF=m
++CONFIG_HW_RANDOM=y
++# CONFIG_HW_RANDOM_TIMERIOMEM is not set
++# CONFIG_NVRAM is not set
++# CONFIG_R3964 is not set
++# CONFIG_RAW_DRIVER is not set
++# CONFIG_TCG_TPM is not set
++# CONFIG_RAMOOPS is not set
++CONFIG_I2C=y
++CONFIG_I2C_BOARDINFO=y
++CONFIG_I2C_COMPAT=y
++CONFIG_I2C_CHARDEV=y
++# CONFIG_I2C_MUX is not set
++CONFIG_I2C_HELPER_AUTO=y
++CONFIG_I2C_ALGOBIT=y
++
++#
++# I2C Hardware Bus support
++#
++
++#
++# I2C system bus drivers (mostly embedded / system-on-chip)
++#
++# CONFIG_I2C_DESIGNWARE is not set
++# CONFIG_I2C_GPIO is not set
++# CONFIG_I2C_OCORES is not set
++# CONFIG_I2C_PCA_PLATFORM is not set
++# CONFIG_I2C_PXA_PCI is not set
++CONFIG_HAVE_S3C2410_I2C=y
++CONFIG_I2C_S3C2410=y
++CONFIG_I2C_SIMTEC=y
++# CONFIG_I2C_XILINX is not set
++
++#
++# External I2C/SMBus adapter drivers
++#
++# CONFIG_I2C_DIOLAN_U2C is not set
++# CONFIG_I2C_PARPORT_LIGHT is not set
++# CONFIG_I2C_TAOS_EVM is not set
++# CONFIG_I2C_TINY_USB is not set
++
++#
++# Other I2C/SMBus bus drivers
++#
++# CONFIG_I2C_STUB is not set
++# CONFIG_I2C_DEBUG_CORE is not set
++# CONFIG_I2C_DEBUG_ALGO is not set
++# CONFIG_I2C_DEBUG_BUS is not set
++CONFIG_SPI=y
++# CONFIG_SPI_DEBUG is not set
++CONFIG_SPI_MASTER=y
++
++#
++# SPI Master Controller Drivers
++#
++# CONFIG_SPI_ALTERA is not set
++CONFIG_SPI_BITBANG=y
++# CONFIG_SPI_GPIO is not set
++# CONFIG_SPI_OC_TINY is not set
++# CONFIG_SPI_PXA2XX_PCI is not set
++CONFIG_SPI_S3C24XX=y
++# CONFIG_SPI_S3C24XX_FIQ is not set
++# CONFIG_SPI_S3C24XX_GPIO is not set
++# CONFIG_SPI_XILINX is not set
++# CONFIG_SPI_DESIGNWARE is not set
++
++#
++# SPI Protocol Masters
++#
++CONFIG_SPI_SPIDEV=y
++# CONFIG_SPI_TLE62X0 is not set
++
++#
++# PPS support
++#
++# CONFIG_PPS is not set
++
++#
++# PPS generators support
++#
++
++#
++# PTP clock support
++#
++
++#
++# Enable Device Drivers -> PPS to see the PTP clock options.
++#
++CONFIG_ARCH_REQUIRE_GPIOLIB=y
++CONFIG_GPIOLIB=y
++# CONFIG_DEBUG_GPIO is not set
++CONFIG_GPIO_SYSFS=y
++
++#
++# Memory mapped GPIO drivers:
++#
++# CONFIG_GPIO_BASIC_MMIO is not set
++# CONFIG_GPIO_IT8761E is not set
++
++#
++# I2C GPIO expanders:
++#
++# CONFIG_GPIO_MAX7300 is not set
++# CONFIG_GPIO_MAX732X is not set
++# CONFIG_GPIO_PCF857X is not set
++# CONFIG_GPIO_SX150X is not set
++# CONFIG_GPIO_ADP5588 is not set
++
++#
++# PCI GPIO expanders:
++#
++
++#
++# SPI GPIO expanders:
++#
++# CONFIG_GPIO_MAX7301 is not set
++# CONFIG_GPIO_MCP23S08 is not set
++# CONFIG_GPIO_MC33880 is not set
++# CONFIG_GPIO_74X164 is not set
++
++#
++# AC97 GPIO expanders:
++#
++
++#
++# MODULbus GPIO expanders:
++#
++# CONFIG_W1 is not set
++# CONFIG_POWER_SUPPLY is not set
++CONFIG_HWMON=y
++# CONFIG_HWMON_VID is not set
++# CONFIG_HWMON_DEBUG_CHIP is not set
++
++#
++# Native drivers
++#
++# CONFIG_SENSORS_AD7414 is not set
++# CONFIG_SENSORS_AD7418 is not set
++# CONFIG_SENSORS_ADCXX is not set
++# CONFIG_SENSORS_ADM1021 is not set
++# CONFIG_SENSORS_ADM1025 is not set
++# CONFIG_SENSORS_ADM1026 is not set
++# CONFIG_SENSORS_ADM1029 is not set
++# CONFIG_SENSORS_ADM1031 is not set
++# CONFIG_SENSORS_ADM9240 is not set
++# CONFIG_SENSORS_ADT7411 is not set
++# CONFIG_SENSORS_ADT7462 is not set
++# CONFIG_SENSORS_ADT7470 is not set
++# CONFIG_SENSORS_ADT7475 is not set
++# CONFIG_SENSORS_ASC7621 is not set
++# CONFIG_SENSORS_ATXP1 is not set
++# CONFIG_SENSORS_DS620 is not set
++# CONFIG_SENSORS_DS1621 is not set
++# CONFIG_SENSORS_F71805F is not set
++# CONFIG_SENSORS_F71882FG is not set
++# CONFIG_SENSORS_F75375S is not set
++# CONFIG_SENSORS_G760A is not set
++# CONFIG_SENSORS_GL518SM is not set
++# CONFIG_SENSORS_GL520SM is not set
++# CONFIG_SENSORS_GPIO_FAN is not set
++# CONFIG_SENSORS_IBMAEM is not set
++# CONFIG_SENSORS_IBMPEX is not set
++# CONFIG_SENSORS_IT87 is not set
++# CONFIG_SENSORS_JC42 is not set
++# CONFIG_SENSORS_LINEAGE is not set
++# CONFIG_SENSORS_LM63 is not set
++# CONFIG_SENSORS_LM70 is not set
++# CONFIG_SENSORS_LM73 is not set
++CONFIG_SENSORS_LM75=y
++# CONFIG_SENSORS_LM77 is not set
++# CONFIG_SENSORS_LM78 is not set
++# CONFIG_SENSORS_LM80 is not set
++# CONFIG_SENSORS_LM83 is not set
++# CONFIG_SENSORS_LM85 is not set
++# CONFIG_SENSORS_LM87 is not set
++# CONFIG_SENSORS_LM90 is not set
++# CONFIG_SENSORS_LM92 is not set
++# CONFIG_SENSORS_LM93 is not set
++# CONFIG_SENSORS_LTC4151 is not set
++# CONFIG_SENSORS_LTC4215 is not set
++# CONFIG_SENSORS_LTC4245 is not set
++# CONFIG_SENSORS_LTC4261 is not set
++# CONFIG_SENSORS_LM95241 is not set
++# CONFIG_SENSORS_MAX1111 is not set
++# CONFIG_SENSORS_MAX16065 is not set
++# CONFIG_SENSORS_MAX1619 is not set
++# CONFIG_SENSORS_MAX6639 is not set
++# CONFIG_SENSORS_MAX6642 is not set
++# CONFIG_SENSORS_MAX6650 is not set
++# CONFIG_SENSORS_PC87360 is not set
++# CONFIG_SENSORS_PC87427 is not set
++# CONFIG_SENSORS_PCF8591 is not set
++# CONFIG_PMBUS is not set
++# CONFIG_SENSORS_SHT15 is not set
++# CONFIG_SENSORS_SHT21 is not set
++# CONFIG_SENSORS_S3C is not set
++# CONFIG_SENSORS_SMM665 is not set
++# CONFIG_SENSORS_DME1737 is not set
++# CONFIG_SENSORS_EMC1403 is not set
++# CONFIG_SENSORS_EMC2103 is not set
++# CONFIG_SENSORS_EMC6W201 is not set
++# CONFIG_SENSORS_SMSC47M1 is not set
++# CONFIG_SENSORS_SMSC47M192 is not set
++# CONFIG_SENSORS_SMSC47B397 is not set
++# CONFIG_SENSORS_SCH5627 is not set
++# CONFIG_SENSORS_ADS1015 is not set
++# CONFIG_SENSORS_ADS7828 is not set
++# CONFIG_SENSORS_ADS7871 is not set
++# CONFIG_SENSORS_AMC6821 is not set
++# CONFIG_SENSORS_THMC50 is not set
++# CONFIG_SENSORS_TMP102 is not set
++# CONFIG_SENSORS_TMP401 is not set
++# CONFIG_SENSORS_TMP421 is not set
++# CONFIG_SENSORS_VT1211 is not set
++# CONFIG_SENSORS_W83781D is not set
++# CONFIG_SENSORS_W83791D is not set
++# CONFIG_SENSORS_W83792D is not set
++# CONFIG_SENSORS_W83793 is not set
++# CONFIG_SENSORS_W83795 is not set
++# CONFIG_SENSORS_W83L785TS is not set
++# CONFIG_SENSORS_W83L786NG is not set
++# CONFIG_SENSORS_W83627HF is not set
++# CONFIG_SENSORS_W83627EHF is not set
++CONFIG_THERMAL=m
++# CONFIG_THERMAL_HWMON is not set
++CONFIG_WATCHDOG=y
++# CONFIG_WATCHDOG_NOWAYOUT is not set
++
++#
++# Watchdog Device Drivers
++#
++# CONFIG_SOFT_WATCHDOG is not set
++CONFIG_S3C2410_WATCHDOG=y
++# CONFIG_MAX63XX_WATCHDOG is not set
++
++#
++# USB-based Watchdog Cards
++#
++# CONFIG_USBPCWATCHDOG is not set
++CONFIG_SSB_POSSIBLE=y
++
++#
++# Sonics Silicon Backplane
++#
++# CONFIG_SSB is not set
++CONFIG_BCMA_POSSIBLE=y
++
++#
++# Broadcom specific AMBA
++#
++# CONFIG_BCMA is not set
++CONFIG_MFD_SUPPORT=y
++# CONFIG_MFD_CORE is not set
++# CONFIG_MFD_88PM860X is not set
++# CONFIG_MFD_SM501 is not set
++# CONFIG_MFD_ASIC3 is not set
++# CONFIG_HTC_EGPIO is not set
++# CONFIG_HTC_PASIC3 is not set
++# CONFIG_HTC_I2CPLD is not set
++# CONFIG_TPS6105X is not set
++# CONFIG_TPS65010 is not set
++# CONFIG_TPS6507X is not set
++# CONFIG_MFD_TPS6586X is not set
++# CONFIG_TWL4030_CORE is not set
++# CONFIG_MFD_STMPE is not set
++# CONFIG_MFD_TC3589X is not set
++# CONFIG_MFD_TMIO is not set
++# CONFIG_MFD_T7L66XB is not set
++# CONFIG_MFD_TC6387XB is not set
++# CONFIG_MFD_TC6393XB is not set
++# CONFIG_PMIC_DA903X is not set
++# CONFIG_PMIC_ADP5520 is not set
++# CONFIG_MFD_MAX8925 is not set
++# CONFIG_MFD_MAX8997 is not set
++# CONFIG_MFD_MAX8998 is not set
++# CONFIG_MFD_WM8400 is not set
++# CONFIG_MFD_WM831X_I2C is not set
++# CONFIG_MFD_WM831X_SPI is not set
++# CONFIG_MFD_WM8350_I2C is not set
++# CONFIG_MFD_WM8994 is not set
++# CONFIG_MFD_PCF50633 is not set
++# CONFIG_MFD_MC13XXX is not set
++# CONFIG_ABX500_CORE is not set
++# CONFIG_EZX_PCAP is not set
++# CONFIG_MFD_WL1273_CORE is not set
++# CONFIG_MFD_TPS65910 is not set
++# CONFIG_REGULATOR is not set
++# CONFIG_MEDIA_SUPPORT is not set
++
++#
++# Graphics support
++#
++# CONFIG_DRM is not set
++# CONFIG_VGASTATE is not set
++CONFIG_VIDEO_OUTPUT_CONTROL=y
++CONFIG_FB=y
++CONFIG_FIRMWARE_EDID=y
++# CONFIG_FB_DDC is not set
++# CONFIG_FB_BOOT_VESA_SUPPORT is not set
++CONFIG_FB_CFB_FILLRECT=y
++CONFIG_FB_CFB_COPYAREA=y
++CONFIG_FB_CFB_IMAGEBLIT=y
++# CONFIG_FB_CFB_REV_PIXELS_IN_BYTE is not set
++# CONFIG_FB_SYS_FILLRECT is not set
++# CONFIG_FB_SYS_COPYAREA is not set
++# CONFIG_FB_SYS_IMAGEBLIT is not set
++# CONFIG_FB_FOREIGN_ENDIAN is not set
++# CONFIG_FB_SYS_FOPS is not set
++# CONFIG_FB_WMT_GE_ROPS is not set
++# CONFIG_FB_SVGALIB is not set
++# CONFIG_FB_MACMODES is not set
++# CONFIG_FB_BACKLIGHT is not set
++CONFIG_FB_MODE_HELPERS=y
++CONFIG_FB_TILEBLITTING=y
++
++#
++# Frame buffer hardware drivers
++#
++# CONFIG_FB_UVESA is not set
++# CONFIG_FB_S1D13XXX is not set
++CONFIG_FB_S3C2410=y
++# CONFIG_FB_S3C2410_DEBUG is not set
++# CONFIG_FB_UDL is not set
++# CONFIG_FB_VIRTUAL is not set
++# CONFIG_FB_METRONOME is not set
++# CONFIG_FB_BROADSHEET is not set
++CONFIG_BACKLIGHT_LCD_SUPPORT=y
++CONFIG_LCD_CLASS_DEVICE=y
++# CONFIG_LCD_L4F00242T03 is not set
++# CONFIG_LCD_LMS283GF05 is not set
++# CONFIG_LCD_LTV350QV is not set
++# CONFIG_LCD_TDO24M is not set
++# CONFIG_LCD_VGG2432A4 is not set
++CONFIG_LCD_PLATFORM=y
++# CONFIG_LCD_S6E63M0 is not set
++# CONFIG_LCD_LD9040 is not set
++CONFIG_BACKLIGHT_CLASS_DEVICE=y
++# CONFIG_BACKLIGHT_GENERIC is not set
++CONFIG_BACKLIGHT_PWM=y
++# CONFIG_BACKLIGHT_ADP8860 is not set
++# CONFIG_BACKLIGHT_ADP8870 is not set
++
++#
++# Display device support
++#
++CONFIG_DISPLAY_SUPPORT=y
++
++#
++# Display hardware drivers
++#
++
++#
++# Console display driver support
++#
++CONFIG_DUMMY_CONSOLE=y
++CONFIG_FRAMEBUFFER_CONSOLE=y
++CONFIG_FRAMEBUFFER_CONSOLE_DETECT_PRIMARY=y
++CONFIG_FRAMEBUFFER_CONSOLE_ROTATION=y
++CONFIG_FONTS=y
++CONFIG_FONT_8x8=y
++# CONFIG_FONT_8x16 is not set
++# CONFIG_FONT_6x11 is not set
++# CONFIG_FONT_7x14 is not set
++# CONFIG_FONT_PEARL_8x8 is not set
++# CONFIG_FONT_ACORN_8x8 is not set
++CONFIG_FONT_MINI_4x6=y
++# CONFIG_FONT_SUN8x16 is not set
++# CONFIG_FONT_SUN12x22 is not set
++# CONFIG_FONT_10x18 is not set
++CONFIG_LOGO=y
++# CONFIG_LOGO_LINUX_MONO is not set
++# CONFIG_LOGO_LINUX_VGA16 is not set
++CONFIG_LOGO_LINUX_CLUT224=y
++CONFIG_SOUND=y
++CONFIG_SOUND_OSS_CORE=y
++CONFIG_SOUND_OSS_CORE_PRECLAIM=y
++CONFIG_SND=y
++CONFIG_SND_TIMER=y
++CONFIG_SND_PCM=y
++CONFIG_SND_HWDEP=m
++CONFIG_SND_RAWMIDI=m
++CONFIG_SND_JACK=y
++# CONFIG_SND_SEQUENCER is not set
++CONFIG_SND_OSSEMUL=y
++CONFIG_SND_MIXER_OSS=y
++CONFIG_SND_PCM_OSS=y
++CONFIG_SND_PCM_OSS_PLUGINS=y
++CONFIG_SND_DYNAMIC_MINORS=y
++# CONFIG_SND_SUPPORT_OLD_API is not set
++CONFIG_SND_VERBOSE_PROCFS=y
++# CONFIG_SND_VERBOSE_PRINTK is not set
++# CONFIG_SND_DEBUG is not set
++# CONFIG_SND_RAWMIDI_SEQ is not set
++# CONFIG_SND_OPL3_LIB_SEQ is not set
++# CONFIG_SND_OPL4_LIB_SEQ is not set
++# CONFIG_SND_SBAWE_SEQ is not set
++# CONFIG_SND_EMU10K1_SEQ is not set
++# CONFIG_SND_DRIVERS is not set
++# CONFIG_SND_ARM is not set
++# CONFIG_SND_SPI is not set
++CONFIG_SND_USB=y
++CONFIG_SND_USB_AUDIO=m
++# CONFIG_SND_USB_UA101 is not set
++CONFIG_SND_USB_CAIAQ=m
++CONFIG_SND_USB_CAIAQ_INPUT=y
++# CONFIG_SND_USB_6FIRE is not set
++CONFIG_SND_SOC=y
++# CONFIG_SND_SOC_CACHE_LZO is not set
++CONFIG_SND_SOC_SAMSUNG=y
++CONFIG_SND_S3C24XX_I2S=y
++# CONFIG_SND_SOC_SAMSUNG_LN2440SBC_ALC650 is not set
++CONFIG_SND_SOC_SAMSUNG_S3C24XX_UDA134X=y
++# CONFIG_SND_SOC_SAMSUNG_SIMTEC_TLV320AIC23 is not set
++# CONFIG_SND_SOC_SAMSUNG_SIMTEC_HERMES is not set
++CONFIG_SND_SOC_I2C_AND_SPI=y
++# CONFIG_SND_SOC_ALL_CODECS is not set
++CONFIG_SND_SOC_L3=y
++CONFIG_SND_SOC_UDA134X=y
++# CONFIG_SOUND_PRIME is not set
++CONFIG_HID_SUPPORT=y
++CONFIG_HID=y
++CONFIG_HIDRAW=y
++
++#
++# USB Input Devices
++#
++CONFIG_USB_HID=y
++CONFIG_HID_PID=y
++CONFIG_USB_HIDDEV=y
++
++#
++# Special HID drivers
++#
++CONFIG_HID_A4TECH=y
++# CONFIG_HID_ACRUX is not set
++CONFIG_HID_APPLE=y
++CONFIG_HID_BELKIN=y
++CONFIG_HID_CHERRY=y
++CONFIG_HID_CHICONY=y
++# CONFIG_HID_PRODIKEYS is not set
++CONFIG_HID_CYPRESS=y
++# CONFIG_HID_DRAGONRISE is not set
++# CONFIG_HID_EMS_FF is not set
++CONFIG_HID_EZKEY=y
++# CONFIG_HID_KEYTOUCH is not set
++CONFIG_HID_KYE=y
++# CONFIG_HID_UCLOGIC is not set
++# CONFIG_HID_WALTOP is not set
++CONFIG_HID_GYRATION=y
++# CONFIG_HID_TWINHAN is not set
++CONFIG_HID_KENSINGTON=y
++# CONFIG_HID_LCPOWER is not set
++CONFIG_HID_LOGITECH=y
++# CONFIG_LOGITECH_FF is not set
++# CONFIG_LOGIRUMBLEPAD2_FF is not set
++# CONFIG_LOGIG940_FF is not set
++# CONFIG_LOGIWII_FF is not set
++CONFIG_HID_MICROSOFT=y
++CONFIG_HID_MONTEREY=y
++# CONFIG_HID_MULTITOUCH is not set
++CONFIG_HID_NTRIG=y
++# CONFIG_HID_ORTEK is not set
++CONFIG_HID_PANTHERLORD=y
++# CONFIG_PANTHERLORD_FF is not set
++CONFIG_HID_PETALYNX=y
++# CONFIG_HID_PICOLCD is not set
++# CONFIG_HID_QUANTA is not set
++# CONFIG_HID_ROCCAT is not set
++# CONFIG_HID_ROCCAT_ARVO is not set
++# CONFIG_HID_ROCCAT_KONE is not set
++# CONFIG_HID_ROCCAT_KONEPLUS is not set
++# CONFIG_HID_ROCCAT_KOVAPLUS is not set
++# CONFIG_HID_ROCCAT_PYRA is not set
++CONFIG_HID_SAMSUNG=y
++CONFIG_HID_SONY=y
++CONFIG_HID_SUNPLUS=y
++# CONFIG_HID_GREENASIA is not set
++# CONFIG_HID_SMARTJOYPLUS is not set
++CONFIG_HID_TOPSEED=y
++# CONFIG_HID_THRUSTMASTER is not set
++# CONFIG_HID_ZEROPLUS is not set
++# CONFIG_HID_ZYDACRON is not set
++CONFIG_USB_SUPPORT=y
++CONFIG_USB_ARCH_HAS_HCD=y
++CONFIG_USB_ARCH_HAS_OHCI=y
++# CONFIG_USB_ARCH_HAS_EHCI is not set
++CONFIG_USB=y
++# CONFIG_USB_DEBUG is not set
++# CONFIG_USB_ANNOUNCE_NEW_DEVICES is not set
++
++#
++# Miscellaneous USB options
++#
++CONFIG_USB_DEVICEFS=y
++# CONFIG_USB_DEVICE_CLASS is not set
++# CONFIG_USB_DYNAMIC_MINORS is not set
++# CONFIG_USB_MON is not set
++# CONFIG_USB_WUSB is not set
++# CONFIG_USB_WUSB_CBAF is not set
++
++#
++# USB Host Controller Drivers
++#
++# CONFIG_USB_C67X00_HCD is not set
++# CONFIG_USB_OXU210HP_HCD is not set
++# CONFIG_USB_ISP116X_HCD is not set
++# CONFIG_USB_ISP1760_HCD is not set
++# CONFIG_USB_ISP1362_HCD is not set
++CONFIG_USB_OHCI_HCD=y
++# CONFIG_USB_OHCI_BIG_ENDIAN_DESC is not set
++# CONFIG_USB_OHCI_BIG_ENDIAN_MMIO is not set
++CONFIG_USB_OHCI_LITTLE_ENDIAN=y
++# CONFIG_USB_SL811_HCD is not set
++# CONFIG_USB_R8A66597_HCD is not set
++# CONFIG_USB_HWA_HCD is not set
++# CONFIG_USB_MUSB_HDRC is not set
++
++#
++# USB Device Class drivers
++#
++CONFIG_USB_ACM=m
++# CONFIG_USB_PRINTER is not set
++CONFIG_USB_WDM=m
++# CONFIG_USB_TMC is not set
++
++#
++# NOTE: USB_STORAGE depends on SCSI but BLK_DEV_SD may
++#
++
++#
++# also be needed; see USB_STORAGE Help for more info
++#
++CONFIG_USB_STORAGE=m
++# CONFIG_USB_STORAGE_DEBUG is not set
++# CONFIG_USB_STORAGE_REALTEK is not set
++CONFIG_USB_STORAGE_DATAFAB=m
++# CONFIG_USB_STORAGE_FREECOM is not set
++CONFIG_USB_STORAGE_ISD200=m
++CONFIG_USB_STORAGE_USBAT=m
++CONFIG_USB_STORAGE_SDDR09=m
++CONFIG_USB_STORAGE_SDDR55=m
++CONFIG_USB_STORAGE_JUMPSHOT=m
++CONFIG_USB_STORAGE_ALAUDA=m
++# CONFIG_USB_STORAGE_ONETOUCH is not set
++# CONFIG_USB_STORAGE_KARMA is not set
++# CONFIG_USB_STORAGE_CYPRESS_ATACB is not set
++# CONFIG_USB_STORAGE_ENE_UB6250 is not set
++# CONFIG_USB_UAS is not set
++CONFIG_USB_LIBUSUAL=y
++
++#
++# USB Imaging devices
++#
++# CONFIG_USB_MDC800 is not set
++# CONFIG_USB_MICROTEK is not set
++
++#
++# USB port drivers
++#
++CONFIG_USB_SERIAL=m
++# CONFIG_USB_EZUSB is not set
++# CONFIG_USB_SERIAL_GENERIC is not set
++# CONFIG_USB_SERIAL_AIRCABLE is not set
++# CONFIG_USB_SERIAL_ARK3116 is not set
++# CONFIG_USB_SERIAL_BELKIN is not set
++# CONFIG_USB_SERIAL_CH341 is not set
++# CONFIG_USB_SERIAL_WHITEHEAT is not set
++# CONFIG_USB_SERIAL_DIGI_ACCELEPORT is not set
++CONFIG_USB_SERIAL_CP210X=m
++# CONFIG_USB_SERIAL_CYPRESS_M8 is not set
++# CONFIG_USB_SERIAL_EMPEG is not set
++CONFIG_USB_SERIAL_FTDI_SIO=m
++# CONFIG_USB_SERIAL_FUNSOFT is not set
++# CONFIG_USB_SERIAL_VISOR is not set
++# CONFIG_USB_SERIAL_IPAQ is not set
++# CONFIG_USB_SERIAL_IR is not set
++# CONFIG_USB_SERIAL_EDGEPORT is not set
++# CONFIG_USB_SERIAL_EDGEPORT_TI is not set
++# CONFIG_USB_SERIAL_GARMIN is not set
++# CONFIG_USB_SERIAL_IPW is not set
++# CONFIG_USB_SERIAL_IUU is not set
++# CONFIG_USB_SERIAL_KEYSPAN_PDA is not set
++# CONFIG_USB_SERIAL_KEYSPAN is not set
++# CONFIG_USB_SERIAL_KLSI is not set
++# CONFIG_USB_SERIAL_KOBIL_SCT is not set
++# CONFIG_USB_SERIAL_MCT_U232 is not set
++# CONFIG_USB_SERIAL_MOS7720 is not set
++# CONFIG_USB_SERIAL_MOS7840 is not set
++# CONFIG_USB_SERIAL_MOTOROLA is not set
++# CONFIG_USB_SERIAL_NAVMAN is not set
++# CONFIG_USB_SERIAL_PL2303 is not set
++# CONFIG_USB_SERIAL_OTI6858 is not set
++# CONFIG_USB_SERIAL_QCAUX is not set
++# CONFIG_USB_SERIAL_QUALCOMM is not set
++CONFIG_USB_SERIAL_SPCP8X5=m
++# CONFIG_USB_SERIAL_HP4X is not set
++# CONFIG_USB_SERIAL_SAFE is not set
++# CONFIG_USB_SERIAL_SIEMENS_MPI is not set
++# CONFIG_USB_SERIAL_SIERRAWIRELESS is not set
++# CONFIG_USB_SERIAL_SYMBOL is not set
++# CONFIG_USB_SERIAL_TI is not set
++# CONFIG_USB_SERIAL_CYBERJACK is not set
++# CONFIG_USB_SERIAL_XIRCOM is not set
++# CONFIG_USB_SERIAL_OPTION is not set
++# CONFIG_USB_SERIAL_OMNINET is not set
++# CONFIG_USB_SERIAL_OPTICON is not set
++# CONFIG_USB_SERIAL_VIVOPAY_SERIAL is not set
++# CONFIG_USB_SERIAL_ZIO is not set
++# CONFIG_USB_SERIAL_SSU100 is not set
++# CONFIG_USB_SERIAL_DEBUG is not set
++
++#
++# USB Miscellaneous drivers
++#
++# CONFIG_USB_EMI62 is not set
++# CONFIG_USB_EMI26 is not set
++# CONFIG_USB_ADUTUX is not set
++# CONFIG_USB_SEVSEG is not set
++# CONFIG_USB_RIO500 is not set
++# CONFIG_USB_LEGOTOWER is not set
++# CONFIG_USB_LCD is not set
++# CONFIG_USB_LED is not set
++# CONFIG_USB_CYPRESS_CY7C63 is not set
++# CONFIG_USB_CYTHERM is not set
++# CONFIG_USB_IDMOUSE is not set
++# CONFIG_USB_FTDI_ELAN is not set
++# CONFIG_USB_APPLEDISPLAY is not set
++# CONFIG_USB_LD is not set
++# CONFIG_USB_TRANCEVIBRATOR is not set
++# CONFIG_USB_IOWARRIOR is not set
++# CONFIG_USB_TEST is not set
++# CONFIG_USB_ISIGHTFW is not set
++# CONFIG_USB_YUREX is not set
++CONFIG_USB_GADGET=y
++# CONFIG_USB_GADGET_DEBUG is not set
++# CONFIG_USB_GADGET_DEBUG_FILES is not set
++# CONFIG_USB_GADGET_DEBUG_FS is not set
++CONFIG_USB_GADGET_VBUS_DRAW=2
++CONFIG_USB_GADGET_SELECTED=y
++# CONFIG_USB_GADGET_FUSB300 is not set
++# CONFIG_USB_GADGET_R8A66597 is not set
++CONFIG_USB_GADGET_S3C2410=y
++CONFIG_USB_S3C2410=y
++# CONFIG_USB_S3C2410_DEBUG is not set
++# CONFIG_USB_GADGET_S3C_HSUDC is not set
++# CONFIG_USB_GADGET_PXA_U2O is not set
++# CONFIG_USB_GADGET_M66592 is not set
++# CONFIG_USB_GADGET_DUMMY_HCD is not set
++CONFIG_USB_ZERO=m
++# CONFIG_USB_AUDIO is not set
++CONFIG_USB_ETH=m
++CONFIG_USB_ETH_RNDIS=y
++# CONFIG_USB_ETH_EEM is not set
++# CONFIG_USB_G_NCM is not set
++CONFIG_USB_GADGETFS=m
++# CONFIG_USB_FUNCTIONFS is not set
++CONFIG_USB_FILE_STORAGE=m
++# CONFIG_USB_FILE_STORAGE_TEST is not set
++# CONFIG_USB_MASS_STORAGE is not set
++CONFIG_USB_G_SERIAL=m
++# CONFIG_USB_MIDI_GADGET is not set
++# CONFIG_USB_G_PRINTER is not set
++CONFIG_USB_CDC_COMPOSITE=m
++# CONFIG_USB_G_MULTI is not set
++# CONFIG_USB_G_HID is not set
++# CONFIG_USB_G_DBGP is not set
++
++#
++# OTG and related infrastructure
++#
++# CONFIG_USB_GPIO_VBUS is not set
++# CONFIG_USB_ULPI is not set
++# CONFIG_NOP_USB_XCEIV is not set
++CONFIG_MMC=y
++# CONFIG_MMC_DEBUG is not set
++# CONFIG_MMC_UNSAFE_RESUME is not set
++# CONFIG_MMC_CLKGATE is not set
++
++#
++# MMC/SD/SDIO Card Drivers
++#
++CONFIG_MMC_BLOCK=y
++CONFIG_MMC_BLOCK_MINORS=8
++CONFIG_MMC_BLOCK_BOUNCE=y
++CONFIG_SDIO_UART=y
++# CONFIG_MMC_TEST is not set
++
++#
++# MMC/SD/SDIO Host Controller Drivers
++#
++CONFIG_MMC_SDHCI=y
++# CONFIG_MMC_SDHCI_PLTFM is not set
++# CONFIG_MMC_SDHCI_S3C is not set
++CONFIG_MMC_SPI=y
++CONFIG_MMC_S3C=y
++# CONFIG_MMC_S3C_HW_SDIO_IRQ is not set
++CONFIG_MMC_S3C_PIO=y
++# CONFIG_MMC_S3C_DMA is not set
++# CONFIG_MMC_S3C_PIODMA is not set
++# CONFIG_MMC_DW is not set
++# CONFIG_MMC_VUB300 is not set
++# CONFIG_MMC_USHC is not set
++# CONFIG_MEMSTICK is not set
++CONFIG_NEW_LEDS=y
++CONFIG_LEDS_CLASS=y
++
++#
++# LED drivers
++#
++# CONFIG_LEDS_LM3530 is not set
++CONFIG_LEDS_S3C24XX=y
++# CONFIG_LEDS_PCA9532 is not set
++CONFIG_LEDS_GPIO=y
++CONFIG_LEDS_GPIO_PLATFORM=y
++# CONFIG_LEDS_LP3944 is not set
++# CONFIG_LEDS_LP5521 is not set
++# CONFIG_LEDS_LP5523 is not set
++# CONFIG_LEDS_PCA955X is not set
++# CONFIG_LEDS_DAC124S085 is not set
++# CONFIG_LEDS_PWM is not set
++# CONFIG_LEDS_BD2802 is not set
++# CONFIG_LEDS_LT3593 is not set
++CONFIG_LEDS_TRIGGERS=y
++
++#
++# LED Triggers
++#
++CONFIG_LEDS_TRIGGER_TIMER=y
++CONFIG_LEDS_TRIGGER_HEARTBEAT=y
++CONFIG_LEDS_TRIGGER_BACKLIGHT=y
++CONFIG_LEDS_TRIGGER_GPIO=y
++CONFIG_LEDS_TRIGGER_DEFAULT_ON=y
++
++#
++# iptables trigger is under Netfilter config (LED target)
++#
++# CONFIG_NFC_DEVICES is not set
++# CONFIG_ACCESSIBILITY is not set
++CONFIG_RTC_LIB=y
++CONFIG_RTC_CLASS=y
++CONFIG_RTC_HCTOSYS=y
++CONFIG_RTC_HCTOSYS_DEVICE="rtc0"
++# CONFIG_RTC_DEBUG is not set
++
++#
++# RTC interfaces
++#
++CONFIG_RTC_INTF_SYSFS=y
++CONFIG_RTC_INTF_PROC=y
++CONFIG_RTC_INTF_DEV=y
++CONFIG_RTC_INTF_DEV_UIE_EMUL=y
++CONFIG_RTC_DRV_TEST=y
++
++#
++# I2C RTC drivers
++#
++# CONFIG_RTC_DRV_DS1307 is not set
++# CONFIG_RTC_DRV_DS1374 is not set
++# CONFIG_RTC_DRV_DS1672 is not set
++# CONFIG_RTC_DRV_DS3232 is not set
++# CONFIG_RTC_DRV_MAX6900 is not set
++# CONFIG_RTC_DRV_RS5C372 is not set
++# CONFIG_RTC_DRV_ISL1208 is not set
++# CONFIG_RTC_DRV_ISL12022 is not set
++# CONFIG_RTC_DRV_X1205 is not set
++# CONFIG_RTC_DRV_PCF8563 is not set
++# CONFIG_RTC_DRV_PCF8583 is not set
++# CONFIG_RTC_DRV_M41T80 is not set
++# CONFIG_RTC_DRV_BQ32K is not set
++# CONFIG_RTC_DRV_S35390A is not set
++# CONFIG_RTC_DRV_FM3130 is not set
++# CONFIG_RTC_DRV_RX8581 is not set
++# CONFIG_RTC_DRV_RX8025 is not set
++# CONFIG_RTC_DRV_EM3027 is not set
++# CONFIG_RTC_DRV_RV3029C2 is not set
++
++#
++# SPI RTC drivers
++#
++# CONFIG_RTC_DRV_M41T93 is not set
++# CONFIG_RTC_DRV_M41T94 is not set
++# CONFIG_RTC_DRV_DS1305 is not set
++# CONFIG_RTC_DRV_DS1390 is not set
++# CONFIG_RTC_DRV_MAX6902 is not set
++# CONFIG_RTC_DRV_R9701 is not set
++# CONFIG_RTC_DRV_RS5C348 is not set
++# CONFIG_RTC_DRV_DS3234 is not set
++# CONFIG_RTC_DRV_PCF2123 is not set
++
++#
++# Platform RTC drivers
++#
++CONFIG_RTC_DRV_CMOS=y
++# CONFIG_RTC_DRV_DS1286 is not set
++# CONFIG_RTC_DRV_DS1511 is not set
++# CONFIG_RTC_DRV_DS1553 is not set
++# CONFIG_RTC_DRV_DS1742 is not set
++# CONFIG_RTC_DRV_STK17TA8 is not set
++# CONFIG_RTC_DRV_M48T86 is not set
++# CONFIG_RTC_DRV_M48T35 is not set
++# CONFIG_RTC_DRV_M48T59 is not set
++# CONFIG_RTC_DRV_MSM6242 is not set
++# CONFIG_RTC_DRV_BQ4802 is not set
++# CONFIG_RTC_DRV_RP5C01 is not set
++# CONFIG_RTC_DRV_V3020 is not set
++
++#
++# on-CPU RTC drivers
++#
++CONFIG_RTC_DRV_S3C=y
++CONFIG_DMADEVICES=y
++# CONFIG_DMADEVICES_DEBUG is not set
++
++#
++# DMA Devices
++#
++# CONFIG_DW_DMAC is not set
++# CONFIG_TIMB_DMA is not set
++# CONFIG_AUXDISPLAY is not set
++# CONFIG_UIO is not set
++# CONFIG_STAGING is not set
++
++#
++# File systems
++#
++CONFIG_EXT2_FS=m
++CONFIG_EXT2_FS_XATTR=y
++CONFIG_EXT2_FS_POSIX_ACL=y
++CONFIG_EXT2_FS_SECURITY=y
++# CONFIG_EXT2_FS_XIP is not set
++CONFIG_EXT3_FS=y
++CONFIG_EXT3_DEFAULTS_TO_ORDERED=y
++CONFIG_EXT3_FS_XATTR=y
++CONFIG_EXT3_FS_POSIX_ACL=y
++CONFIG_EXT3_FS_SECURITY=y
++# CONFIG_EXT4_FS is not set
++CONFIG_JBD=y
++# CONFIG_JBD_DEBUG is not set
++CONFIG_FS_MBCACHE=y
++# CONFIG_REISERFS_FS is not set
++# CONFIG_JFS_FS is not set
++# CONFIG_XFS_FS is not set
++# CONFIG_GFS2_FS is not set
++# CONFIG_OCFS2_FS is not set
++# CONFIG_BTRFS_FS is not set
++# CONFIG_NILFS2_FS is not set
++CONFIG_FS_POSIX_ACL=y
++CONFIG_FILE_LOCKING=y
++CONFIG_FSNOTIFY=y
++CONFIG_DNOTIFY=y
++CONFIG_INOTIFY_USER=y
++# CONFIG_FANOTIFY is not set
++# CONFIG_QUOTA is not set
++# CONFIG_QUOTACTL is not set
++CONFIG_AUTOFS4_FS=y
++# CONFIG_FUSE_FS is not set
++CONFIG_GENERIC_ACL=y
++
++#
++# Caches
++#
++# CONFIG_FSCACHE is not set
++
++#
++# CD-ROM/DVD Filesystems
++#
++# CONFIG_ISO9660_FS is not set
++# CONFIG_UDF_FS is not set
++
++#
++# DOS/FAT/NT Filesystems
++#
++CONFIG_FAT_FS=y
++CONFIG_MSDOS_FS=y
++CONFIG_VFAT_FS=y
++CONFIG_FAT_DEFAULT_CODEPAGE=437
++CONFIG_FAT_DEFAULT_IOCHARSET="iso8859-1"
++# CONFIG_NTFS_FS is not set
++
++#
++# Pseudo filesystems
++#
++CONFIG_PROC_FS=y
++CONFIG_PROC_SYSCTL=y
++CONFIG_PROC_PAGE_MONITOR=y
++CONFIG_SYSFS=y
++CONFIG_TMPFS=y
++CONFIG_TMPFS_POSIX_ACL=y
++CONFIG_TMPFS_XATTR=y
++# CONFIG_HUGETLB_PAGE is not set
++CONFIG_CONFIGFS_FS=m
++CONFIG_MISC_FILESYSTEMS=y
++# CONFIG_ADFS_FS is not set
++# CONFIG_AFFS_FS is not set
++# CONFIG_ECRYPT_FS is not set
++# CONFIG_HFS_FS is not set
++# CONFIG_HFSPLUS_FS is not set
++# CONFIG_BEFS_FS is not set
++# CONFIG_BFS_FS is not set
++# CONFIG_EFS_FS is not set
++CONFIG_JFFS2_FS=y
++CONFIG_JFFS2_FS_DEBUG=0
++CONFIG_JFFS2_FS_WRITEBUFFER=y
++# CONFIG_JFFS2_FS_WBUF_VERIFY is not set
++# CONFIG_JFFS2_SUMMARY is not set
++# CONFIG_JFFS2_FS_XATTR is not set
++# CONFIG_JFFS2_COMPRESSION_OPTIONS is not set
++CONFIG_JFFS2_ZLIB=y
++# CONFIG_JFFS2_LZO is not set
++CONFIG_JFFS2_RTIME=y
++# CONFIG_JFFS2_RUBIN is not set
++CONFIG_UBIFS_FS=y
++CONFIG_UBIFS_FS_XATTR=y
++CONFIG_UBIFS_FS_ADVANCED_COMPR=y
++CONFIG_UBIFS_FS_LZO=y
++CONFIG_UBIFS_FS_ZLIB=y
++# CONFIG_UBIFS_FS_DEBUG is not set
++# CONFIG_LOGFS is not set
++CONFIG_CRAMFS=y
++# CONFIG_SQUASHFS is not set
++# CONFIG_VXFS_FS is not set
++# CONFIG_MINIX_FS is not set
++# CONFIG_OMFS_FS is not set
++# CONFIG_HPFS_FS is not set
++# CONFIG_QNX4FS_FS is not set
++CONFIG_ROMFS_FS=y
++# CONFIG_ROMFS_BACKED_BY_BLOCK is not set
++# CONFIG_ROMFS_BACKED_BY_MTD is not set
++CONFIG_ROMFS_BACKED_BY_BOTH=y
++CONFIG_ROMFS_ON_BLOCK=y
++CONFIG_ROMFS_ON_MTD=y
++# CONFIG_PSTORE is not set
++# CONFIG_SYSV_FS is not set
++# CONFIG_UFS_FS is not set
++CONFIG_NETWORK_FILESYSTEMS=y
++CONFIG_NFS_FS=y
++CONFIG_NFS_V3=y
++CONFIG_NFS_V3_ACL=y
++CONFIG_NFS_V4=y
++# CONFIG_NFS_V4_1 is not set
++CONFIG_ROOT_NFS=y
++# CONFIG_NFS_USE_LEGACY_DNS is not set
++CONFIG_NFS_USE_KERNEL_DNS=y
++# CONFIG_NFS_USE_NEW_IDMAPPER is not set
++# CONFIG_NFSD is not set
++CONFIG_LOCKD=y
++CONFIG_LOCKD_V4=y
++CONFIG_NFS_ACL_SUPPORT=y
++CONFIG_NFS_COMMON=y
++CONFIG_SUNRPC=y
++CONFIG_SUNRPC_GSS=y
++# CONFIG_CEPH_FS is not set
++# CONFIG_CIFS is not set
++# CONFIG_NCP_FS is not set
++# CONFIG_CODA_FS is not set
++# CONFIG_AFS_FS is not set
++
++#
++# Partition Types
++#
++CONFIG_PARTITION_ADVANCED=y
++# CONFIG_ACORN_PARTITION is not set
++# CONFIG_OSF_PARTITION is not set
++# CONFIG_AMIGA_PARTITION is not set
++# CONFIG_ATARI_PARTITION is not set
++# CONFIG_MAC_PARTITION is not set
++CONFIG_MSDOS_PARTITION=y
++CONFIG_BSD_DISKLABEL=y
++CONFIG_MINIX_SUBPARTITION=y
++CONFIG_SOLARIS_X86_PARTITION=y
++CONFIG_UNIXWARE_DISKLABEL=y
++CONFIG_LDM_PARTITION=y
++# CONFIG_LDM_DEBUG is not set
++# CONFIG_SGI_PARTITION is not set
++# CONFIG_ULTRIX_PARTITION is not set
++# CONFIG_SUN_PARTITION is not set
++# CONFIG_KARMA_PARTITION is not set
++CONFIG_EFI_PARTITION=y
++# CONFIG_SYSV68_PARTITION is not set
++CONFIG_NLS=y
++CONFIG_NLS_DEFAULT="cp437"
++CONFIG_NLS_CODEPAGE_437=m
++CONFIG_NLS_CODEPAGE_737=m
++CONFIG_NLS_CODEPAGE_775=m
++CONFIG_NLS_CODEPAGE_850=m
++CONFIG_NLS_CODEPAGE_852=m
++CONFIG_NLS_CODEPAGE_855=m
++CONFIG_NLS_CODEPAGE_857=m
++CONFIG_NLS_CODEPAGE_860=m
++CONFIG_NLS_CODEPAGE_861=m
++CONFIG_NLS_CODEPAGE_862=m
++CONFIG_NLS_CODEPAGE_863=m
++CONFIG_NLS_CODEPAGE_864=m
++CONFIG_NLS_CODEPAGE_865=m
++CONFIG_NLS_CODEPAGE_866=m
++CONFIG_NLS_CODEPAGE_869=m
++CONFIG_NLS_CODEPAGE_936=m
++CONFIG_NLS_CODEPAGE_950=m
++CONFIG_NLS_CODEPAGE_932=m
++CONFIG_NLS_CODEPAGE_949=m
++CONFIG_NLS_CODEPAGE_874=m
++CONFIG_NLS_ISO8859_8=m
++CONFIG_NLS_CODEPAGE_1250=m
++CONFIG_NLS_CODEPAGE_1251=m
++CONFIG_NLS_ASCII=m
++CONFIG_NLS_ISO8859_1=m
++CONFIG_NLS_ISO8859_2=m
++CONFIG_NLS_ISO8859_3=m
++CONFIG_NLS_ISO8859_4=m
++CONFIG_NLS_ISO8859_5=m
++CONFIG_NLS_ISO8859_6=m
++CONFIG_NLS_ISO8859_7=m
++CONFIG_NLS_ISO8859_9=m
++CONFIG_NLS_ISO8859_13=m
++CONFIG_NLS_ISO8859_14=m
++CONFIG_NLS_ISO8859_15=m
++CONFIG_NLS_KOI8_R=m
++CONFIG_NLS_KOI8_U=m
++CONFIG_NLS_UTF8=m
++# CONFIG_DLM is not set
++
++#
++# Kernel hacking
++#
++# CONFIG_PRINTK_TIME is not set
++CONFIG_DEFAULT_MESSAGE_LOGLEVEL=4
++# CONFIG_ENABLE_WARN_DEPRECATED is not set
++# CONFIG_ENABLE_MUST_CHECK is not set
++CONFIG_FRAME_WARN=1024
++# CONFIG_MAGIC_SYSRQ is not set
++CONFIG_STRIP_ASM_SYMS=y
++# CONFIG_UNUSED_SYMBOLS is not set
++CONFIG_DEBUG_FS=y
++# CONFIG_HEADERS_CHECK is not set
++# CONFIG_DEBUG_SECTION_MISMATCH is not set
++CONFIG_DEBUG_KERNEL=y
++# CONFIG_DEBUG_SHIRQ is not set
++# CONFIG_LOCKUP_DETECTOR is not set
++# CONFIG_HARDLOCKUP_DETECTOR is not set
++# CONFIG_DETECT_HUNG_TASK is not set
++# CONFIG_SCHED_DEBUG is not set
++# CONFIG_SCHEDSTATS is not set
++# CONFIG_TIMER_STATS is not set
++# CONFIG_DEBUG_OBJECTS is not set
++# CONFIG_SLUB_DEBUG_ON is not set
++# CONFIG_SLUB_STATS is not set
++# CONFIG_DEBUG_KMEMLEAK is not set
++# CONFIG_DEBUG_RT_MUTEXES is not set
++# CONFIG_RT_MUTEX_TESTER is not set
++# CONFIG_DEBUG_SPINLOCK is not set
++# CONFIG_DEBUG_MUTEXES is not set
++# CONFIG_DEBUG_LOCK_ALLOC is not set
++# CONFIG_PROVE_LOCKING is not set
++# CONFIG_SPARSE_RCU_POINTER is not set
++# CONFIG_LOCK_STAT is not set
++# CONFIG_DEBUG_SPINLOCK_SLEEP is not set
++# CONFIG_DEBUG_LOCKING_API_SELFTESTS is not set
++# CONFIG_DEBUG_STACK_USAGE is not set
++# CONFIG_DEBUG_KOBJECT is not set
++CONFIG_DEBUG_BUGVERBOSE=y
++CONFIG_DEBUG_INFO=y
++# CONFIG_DEBUG_INFO_REDUCED is not set
++# CONFIG_DEBUG_VM is not set
++# CONFIG_DEBUG_WRITECOUNT is not set
++CONFIG_DEBUG_MEMORY_INIT=y
++# CONFIG_DEBUG_LIST is not set
++# CONFIG_TEST_LIST_SORT is not set
++# CONFIG_DEBUG_SG is not set
++# CONFIG_DEBUG_NOTIFIERS is not set
++# CONFIG_DEBUG_CREDENTIALS is not set
++# CONFIG_BOOT_PRINTK_DELAY is not set
++# CONFIG_RCU_TORTURE_TEST is not set
++# CONFIG_BACKTRACE_SELF_TEST is not set
++# CONFIG_DEBUG_BLOCK_EXT_DEVT is not set
++# CONFIG_DEBUG_FORCE_WEAK_PER_CPU is not set
++# CONFIG_LKDTM is not set
++# CONFIG_FAULT_INJECTION is not set
++# CONFIG_LATENCYTOP is not set
++CONFIG_SYSCTL_SYSCALL_CHECK=y
++# CONFIG_DEBUG_PAGEALLOC is not set
++CONFIG_HAVE_FUNCTION_TRACER=y
++CONFIG_HAVE_FUNCTION_GRAPH_TRACER=y
++CONFIG_HAVE_DYNAMIC_FTRACE=y
++CONFIG_HAVE_FTRACE_MCOUNT_RECORD=y
++CONFIG_HAVE_C_RECORDMCOUNT=y
++CONFIG_TRACING_SUPPORT=y
++CONFIG_FTRACE=y
++# CONFIG_FUNCTION_TRACER is not set
++# CONFIG_SCHED_TRACER is not set
++# CONFIG_ENABLE_DEFAULT_TRACERS is not set
++CONFIG_BRANCH_PROFILE_NONE=y
++# CONFIG_PROFILE_ANNOTATED_BRANCHES is not set
++# CONFIG_PROFILE_ALL_BRANCHES is not set
++# CONFIG_STACK_TRACER is not set
++# CONFIG_BLK_DEV_IO_TRACE is not set
++# CONFIG_DYNAMIC_DEBUG is not set
++# CONFIG_DMA_API_DEBUG is not set
++# CONFIG_ATOMIC64_SELFTEST is not set
++# CONFIG_SAMPLES is not set
++CONFIG_HAVE_ARCH_KGDB=y
++# CONFIG_KGDB is not set
++# CONFIG_TEST_KSTRTOX is not set
++# CONFIG_STRICT_DEVMEM is not set
++CONFIG_ARM_UNWIND=y
++CONFIG_DEBUG_USER=y
++# CONFIG_DEBUG_LL is not set
++# CONFIG_OC_ETM is not set
++CONFIG_DEBUG_S3C_UART=0
++
++#
++# Security options
++#
++CONFIG_KEYS=y
++# CONFIG_KEYS_DEBUG_PROC_KEYS is not set
++# CONFIG_SECURITY_DMESG_RESTRICT is not set
++# CONFIG_SECURITY is not set
++# CONFIG_SECURITYFS is not set
++CONFIG_DEFAULT_SECURITY_DAC=y
++CONFIG_DEFAULT_SECURITY=""
++CONFIG_CRYPTO=y
++
++#
++# Crypto core or helper
++#
++CONFIG_CRYPTO_ALGAPI=y
++CONFIG_CRYPTO_ALGAPI2=y
++CONFIG_CRYPTO_AEAD=m
++CONFIG_CRYPTO_AEAD2=y
++CONFIG_CRYPTO_BLKCIPHER=y
++CONFIG_CRYPTO_BLKCIPHER2=y
++CONFIG_CRYPTO_HASH=y
++CONFIG_CRYPTO_HASH2=y
++CONFIG_CRYPTO_RNG=m
++CONFIG_CRYPTO_RNG2=y
++CONFIG_CRYPTO_PCOMP=m
++CONFIG_CRYPTO_PCOMP2=y
++CONFIG_CRYPTO_MANAGER=y
++CONFIG_CRYPTO_MANAGER2=y
++CONFIG_CRYPTO_MANAGER_DISABLE_TESTS=y
++CONFIG_CRYPTO_GF128MUL=m
++CONFIG_CRYPTO_NULL=m
++CONFIG_CRYPTO_WORKQUEUE=y
++CONFIG_CRYPTO_CRYPTD=m
++CONFIG_CRYPTO_AUTHENC=m
++CONFIG_CRYPTO_TEST=m
++
++#
++# Authenticated Encryption with Associated Data
++#
++CONFIG_CRYPTO_CCM=m
++CONFIG_CRYPTO_GCM=m
++CONFIG_CRYPTO_SEQIV=m
++
++#
++# Block modes
++#
++# CONFIG_CRYPTO_CBC is not set
++CONFIG_CRYPTO_CTR=m
++CONFIG_CRYPTO_CTS=m
++CONFIG_CRYPTO_ECB=y
++CONFIG_CRYPTO_LRW=m
++CONFIG_CRYPTO_PCBC=m
++CONFIG_CRYPTO_XTS=m
++
++#
++# Hash modes
++#
++CONFIG_CRYPTO_HMAC=y
++CONFIG_CRYPTO_XCBC=m
++# CONFIG_CRYPTO_VMAC is not set
++
++#
++# Digest
++#
++CONFIG_CRYPTO_CRC32C=m
++CONFIG_CRYPTO_GHASH=m
++CONFIG_CRYPTO_MD4=m
++# CONFIG_CRYPTO_MD5 is not set
++CONFIG_CRYPTO_MICHAEL_MIC=y
++CONFIG_CRYPTO_RMD128=m
++CONFIG_CRYPTO_RMD160=m
++CONFIG_CRYPTO_RMD256=m
++CONFIG_CRYPTO_RMD320=m
++CONFIG_CRYPTO_SHA1=m
++CONFIG_CRYPTO_SHA256=m
++CONFIG_CRYPTO_SHA512=m
++CONFIG_CRYPTO_TGR192=m
++CONFIG_CRYPTO_WP512=m
++
++#
++# Ciphers
++#
++CONFIG_CRYPTO_AES=y
++CONFIG_CRYPTO_ANUBIS=m
++CONFIG_CRYPTO_ARC4=y
++CONFIG_CRYPTO_BLOWFISH=m
++CONFIG_CRYPTO_CAMELLIA=m
++CONFIG_CRYPTO_CAST5=m
++CONFIG_CRYPTO_CAST6=m
++# CONFIG_CRYPTO_DES is not set
++CONFIG_CRYPTO_FCRYPT=m
++CONFIG_CRYPTO_KHAZAD=m
++CONFIG_CRYPTO_SALSA20=m
++CONFIG_CRYPTO_SEED=m
++CONFIG_CRYPTO_SERPENT=m
++CONFIG_CRYPTO_TEA=m
++CONFIG_CRYPTO_TWOFISH=m
++CONFIG_CRYPTO_TWOFISH_COMMON=m
++
++#
++# Compression
++#
++CONFIG_CRYPTO_DEFLATE=y
++CONFIG_CRYPTO_ZLIB=m
++CONFIG_CRYPTO_LZO=y
++
++#
++# Random Number Generation
++#
++CONFIG_CRYPTO_ANSI_CPRNG=m
++# CONFIG_CRYPTO_USER_API_HASH is not set
++# CONFIG_CRYPTO_USER_API_SKCIPHER is not set
++CONFIG_CRYPTO_HW=y
++# CONFIG_BINARY_PRINTF is not set
++
++#
++# Library routines
++#
++CONFIG_BITREVERSE=y
++CONFIG_CRC_CCITT=m
++CONFIG_CRC16=y
++CONFIG_CRC_T10DIF=y
++CONFIG_CRC_ITU_T=y
++CONFIG_CRC32=y
++CONFIG_CRC7=y
++CONFIG_LIBCRC32C=m
++CONFIG_ZLIB_INFLATE=y
++CONFIG_ZLIB_DEFLATE=y
++CONFIG_LZO_COMPRESS=y
++CONFIG_LZO_DECOMPRESS=y
++CONFIG_XZ_DEC=y
++CONFIG_XZ_DEC_X86=y
++CONFIG_XZ_DEC_POWERPC=y
++CONFIG_XZ_DEC_IA64=y
++CONFIG_XZ_DEC_ARM=y
++CONFIG_XZ_DEC_ARMTHUMB=y
++CONFIG_XZ_DEC_SPARC=y
++CONFIG_XZ_DEC_BCJ=y
++# CONFIG_XZ_DEC_TEST is not set
++CONFIG_HAS_IOMEM=y
++CONFIG_HAS_DMA=y
++CONFIG_NLATTR=y
++CONFIG_GENERIC_ATOMIC64=y
++CONFIG_AVERAGE=y
+diff -Naur linux-3.0.54/drivers/input/misc/Kconfig linux-3.0.54_1/drivers/input/misc/Kconfig
+--- linux-3.0.54/drivers/input/misc/Kconfig	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/drivers/input/misc/Kconfig	2017-04-19 10:52:15.318939917 -0800
+@@ -321,7 +321,7 @@
+ 
+ config INPUT_PWM_BEEPER
+ 	tristate "PWM beeper support"
+-	depends on HAVE_PWM
++    #depends on HAVE_PWM
+ 	help
+ 	  Say Y here to get support for PWM based beeper devices.
+ 
+diff -Naur linux-3.0.54/drivers/tty/serial/samsung.c linux-3.0.54_1/drivers/tty/serial/samsung.c
+--- linux-3.0.54/drivers/tty/serial/samsung.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/drivers/tty/serial/samsung.c	2017-04-05 12:55:39.542922992 -0800
+@@ -54,7 +54,8 @@
+ 
+ /* UART name and device definitions */
+ 
+-#define S3C24XX_SERIAL_NAME	"ttySAC"
++//#define S3C24XX_SERIAL_NAME	"ttySAC"
++#define S3C24XX_SERIAL_NAME	"ttyS"
+ #define S3C24XX_SERIAL_MAJOR	204
+ #define S3C24XX_SERIAL_MINOR	64
+ 
+diff -Naur linux-3.0.54/include/linux/dm9000.h linux-3.0.54_1/include/linux/dm9000.h
+--- linux-3.0.54/include/linux/dm9000.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/dm9000.h	2017-03-24 15:27:13.225975647 -0800
+@@ -10,6 +10,7 @@
+  * published by the Free Software Foundation.
+  *
+ */
++#include <linux/io.h>
+ 
+ #ifndef __DM9000_PLATFORM_DATA
+ #define __DM9000_PLATFORM_DATA __FILE__
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_connmark.h linux-3.0.54_1/include/linux/netfilter/xt_connmark.h
+--- linux-3.0.54/include/linux/netfilter/xt_connmark.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_connmark.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,31 +0,0 @@
+-#ifndef _XT_CONNMARK_H
+-#define _XT_CONNMARK_H
+-
+-#include <linux/types.h>
+-
+-/* Copyright (C) 2002,2004 MARA Systems AB <http://www.marasystems.com>
+- * by Henrik Nordstrom <hno@marasystems.com>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License as published by
+- * the Free Software Foundation; either version 2 of the License, or
+- * (at your option) any later version.
+- */
+-
+-enum {
+-	XT_CONNMARK_SET = 0,
+-	XT_CONNMARK_SAVE,
+-	XT_CONNMARK_RESTORE
+-};
+-
+-struct xt_connmark_tginfo1 {
+-	__u32 ctmark, ctmask, nfmask;
+-	__u8 mode;
+-};
+-
+-struct xt_connmark_mtinfo1 {
+-	__u32 mark, mask;
+-	__u8 invert;
+-};
+-
+-#endif /*_XT_CONNMARK_H*/
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_CONNMARK.h linux-3.0.54_1/include/linux/netfilter/xt_CONNMARK.h
+--- linux-3.0.54/include/linux/netfilter/xt_CONNMARK.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_CONNMARK.h	2012-12-03 12:59:38.000000000 -0800
+@@ -1,6 +1,31 @@
+-#ifndef _XT_CONNMARK_H_target
+-#define _XT_CONNMARK_H_target
++#ifndef _XT_CONNMARK_H
++#define _XT_CONNMARK_H
+ 
+-#include <linux/netfilter/xt_connmark.h>
++#include <linux/types.h>
+ 
+-#endif /*_XT_CONNMARK_H_target*/
++/* Copyright (C) 2002,2004 MARA Systems AB <http://www.marasystems.com>
++ * by Henrik Nordstrom <hno@marasystems.com>
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 2 of the License, or
++ * (at your option) any later version.
++ */
++
++enum {
++	XT_CONNMARK_SET = 0,
++	XT_CONNMARK_SAVE,
++	XT_CONNMARK_RESTORE
++};
++
++struct xt_connmark_tginfo1 {
++	__u32 ctmark, ctmask, nfmask;
++	__u8 mode;
++};
++
++struct xt_connmark_mtinfo1 {
++	__u32 mark, mask;
++	__u8 invert;
++};
++
++#endif /*_XT_CONNMARK_H*/
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_dscp.h linux-3.0.54_1/include/linux/netfilter/xt_dscp.h
+--- linux-3.0.54/include/linux/netfilter/xt_dscp.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_dscp.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,31 +0,0 @@
+-/* x_tables module for matching the IPv4/IPv6 DSCP field
+- *
+- * (C) 2002 Harald Welte <laforge@gnumonks.org>
+- * This software is distributed under GNU GPL v2, 1991
+- *
+- * See RFC2474 for a description of the DSCP field within the IP Header.
+- *
+- * xt_dscp.h,v 1.3 2002/08/05 19:00:21 laforge Exp
+-*/
+-#ifndef _XT_DSCP_H
+-#define _XT_DSCP_H
+-
+-#include <linux/types.h>
+-
+-#define XT_DSCP_MASK	0xfc	/* 11111100 */
+-#define XT_DSCP_SHIFT	2
+-#define XT_DSCP_MAX	0x3f	/* 00111111 */
+-
+-/* match info */
+-struct xt_dscp_info {
+-	__u8 dscp;
+-	__u8 invert;
+-};
+-
+-struct xt_tos_match_info {
+-	__u8 tos_mask;
+-	__u8 tos_value;
+-	__u8 invert;
+-};
+-
+-#endif /* _XT_DSCP_H */
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_DSCP.h linux-3.0.54_1/include/linux/netfilter/xt_DSCP.h
+--- linux-3.0.54/include/linux/netfilter/xt_DSCP.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_DSCP.h	2012-12-03 12:59:38.000000000 -0800
+@@ -1,26 +1,31 @@
+-/* x_tables module for setting the IPv4/IPv6 DSCP field
++/* x_tables module for matching the IPv4/IPv6 DSCP field
+  *
+  * (C) 2002 Harald Welte <laforge@gnumonks.org>
+- * based on ipt_FTOS.c (C) 2000 by Matthew G. Marsh <mgm@paktronix.com>
+  * This software is distributed under GNU GPL v2, 1991
+  *
+  * See RFC2474 for a description of the DSCP field within the IP Header.
+  *
+- * xt_DSCP.h,v 1.7 2002/03/14 12:03:13 laforge Exp
++ * xt_dscp.h,v 1.3 2002/08/05 19:00:21 laforge Exp
+ */
+-#ifndef _XT_DSCP_TARGET_H
+-#define _XT_DSCP_TARGET_H
+-#include <linux/netfilter/xt_dscp.h>
++#ifndef _XT_DSCP_H
++#define _XT_DSCP_H
++
+ #include <linux/types.h>
+ 
+-/* target info */
+-struct xt_DSCP_info {
++#define XT_DSCP_MASK	0xfc	/* 11111100 */
++#define XT_DSCP_SHIFT	2
++#define XT_DSCP_MAX	0x3f	/* 00111111 */
++
++/* match info */
++struct xt_dscp_info {
+ 	__u8 dscp;
++	__u8 invert;
+ };
+ 
+-struct xt_tos_target_info {
+-	__u8 tos_value;
++struct xt_tos_match_info {
+ 	__u8 tos_mask;
++	__u8 tos_value;
++	__u8 invert;
+ };
+ 
+-#endif /* _XT_DSCP_TARGET_H */
++#endif /* _XT_DSCP_H */
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_mark.h linux-3.0.54_1/include/linux/netfilter/xt_mark.h
+--- linux-3.0.54/include/linux/netfilter/xt_mark.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_mark.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,15 +0,0 @@
+-#ifndef _XT_MARK_H
+-#define _XT_MARK_H
+-
+-#include <linux/types.h>
+-
+-struct xt_mark_tginfo2 {
+-	__u32 mark, mask;
+-};
+-
+-struct xt_mark_mtinfo1 {
+-	__u32 mark, mask;
+-	__u8 invert;
+-};
+-
+-#endif /*_XT_MARK_H*/
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_MARK.h linux-3.0.54_1/include/linux/netfilter/xt_MARK.h
+--- linux-3.0.54/include/linux/netfilter/xt_MARK.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_MARK.h	2012-12-03 12:59:38.000000000 -0800
+@@ -1,6 +1,15 @@
+-#ifndef _XT_MARK_H_target
+-#define _XT_MARK_H_target
++#ifndef _XT_MARK_H
++#define _XT_MARK_H
+ 
+-#include <linux/netfilter/xt_mark.h>
++#include <linux/types.h>
+ 
+-#endif /*_XT_MARK_H_target */
++struct xt_mark_tginfo2 {
++	__u32 mark, mask;
++};
++
++struct xt_mark_mtinfo1 {
++	__u32 mark, mask;
++	__u8 invert;
++};
++
++#endif /*_XT_MARK_H*/
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_rateest.h linux-3.0.54_1/include/linux/netfilter/xt_rateest.h
+--- linux-3.0.54/include/linux/netfilter/xt_rateest.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_rateest.h	2012-12-03 12:59:38.000000000 -0800
+@@ -1,37 +1,15 @@
+-#ifndef _XT_RATEEST_MATCH_H
+-#define _XT_RATEEST_MATCH_H
++#ifndef _XT_RATEEST_TARGET_H
++#define _XT_RATEEST_TARGET_H
+ 
+ #include <linux/types.h>
+ 
+-enum xt_rateest_match_flags {
+-	XT_RATEEST_MATCH_INVERT	= 1<<0,
+-	XT_RATEEST_MATCH_ABS	= 1<<1,
+-	XT_RATEEST_MATCH_REL	= 1<<2,
+-	XT_RATEEST_MATCH_DELTA	= 1<<3,
+-	XT_RATEEST_MATCH_BPS	= 1<<4,
+-	XT_RATEEST_MATCH_PPS	= 1<<5,
+-};
+-
+-enum xt_rateest_match_mode {
+-	XT_RATEEST_MATCH_NONE,
+-	XT_RATEEST_MATCH_EQ,
+-	XT_RATEEST_MATCH_LT,
+-	XT_RATEEST_MATCH_GT,
+-};
+-
+-struct xt_rateest_match_info {
+-	char			name1[IFNAMSIZ];
+-	char			name2[IFNAMSIZ];
+-	__u16		flags;
+-	__u16		mode;
+-	__u32		bps1;
+-	__u32		pps1;
+-	__u32		bps2;
+-	__u32		pps2;
++struct xt_rateest_target_info {
++	char			name[IFNAMSIZ];
++	__s8			interval;
++	__u8		ewma_log;
+ 
+ 	/* Used internally by the kernel */
+-	struct xt_rateest	*est1 __attribute__((aligned(8)));
+-	struct xt_rateest	*est2 __attribute__((aligned(8)));
++	struct xt_rateest	*est __attribute__((aligned(8)));
+ };
+ 
+-#endif /* _XT_RATEEST_MATCH_H */
++#endif /* _XT_RATEEST_TARGET_H */
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_RATEEST.h linux-3.0.54_1/include/linux/netfilter/xt_RATEEST.h
+--- linux-3.0.54/include/linux/netfilter/xt_RATEEST.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_RATEEST.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,15 +0,0 @@
+-#ifndef _XT_RATEEST_TARGET_H
+-#define _XT_RATEEST_TARGET_H
+-
+-#include <linux/types.h>
+-
+-struct xt_rateest_target_info {
+-	char			name[IFNAMSIZ];
+-	__s8			interval;
+-	__u8		ewma_log;
+-
+-	/* Used internally by the kernel */
+-	struct xt_rateest	*est __attribute__((aligned(8)));
+-};
+-
+-#endif /* _XT_RATEEST_TARGET_H */
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_tcpmss.h linux-3.0.54_1/include/linux/netfilter/xt_tcpmss.h
+--- linux-3.0.54/include/linux/netfilter/xt_tcpmss.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_tcpmss.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,11 +0,0 @@
+-#ifndef _XT_TCPMSS_MATCH_H
+-#define _XT_TCPMSS_MATCH_H
+-
+-#include <linux/types.h>
+-
+-struct xt_tcpmss_match_info {
+-    __u16 mss_min, mss_max;
+-    __u8 invert;
+-};
+-
+-#endif /*_XT_TCPMSS_MATCH_H*/
+diff -Naur linux-3.0.54/include/linux/netfilter/xt_TCPMSS.h linux-3.0.54_1/include/linux/netfilter/xt_TCPMSS.h
+--- linux-3.0.54/include/linux/netfilter/xt_TCPMSS.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter/xt_TCPMSS.h	2012-12-03 12:59:38.000000000 -0800
+@@ -1,12 +1,11 @@
+-#ifndef _XT_TCPMSS_H
+-#define _XT_TCPMSS_H
++#ifndef _XT_TCPMSS_MATCH_H
++#define _XT_TCPMSS_MATCH_H
+ 
+ #include <linux/types.h>
+ 
+-struct xt_tcpmss_info {
+-	__u16 mss;
++struct xt_tcpmss_match_info {
++    __u16 mss_min, mss_max;
++    __u8 invert;
+ };
+ 
+-#define XT_TCPMSS_CLAMP_PMTU 0xffff
+-
+-#endif /* _XT_TCPMSS_H */
++#endif /*_XT_TCPMSS_MATCH_H*/
+diff -Naur linux-3.0.54/include/linux/netfilter_ipv4/ipt_ecn.h linux-3.0.54_1/include/linux/netfilter_ipv4/ipt_ecn.h
+--- linux-3.0.54/include/linux/netfilter_ipv4/ipt_ecn.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter_ipv4/ipt_ecn.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,35 +0,0 @@
+-/* iptables module for matching the ECN header in IPv4 and TCP header
+- *
+- * (C) 2002 Harald Welte <laforge@gnumonks.org>
+- *
+- * This software is distributed under GNU GPL v2, 1991
+- * 
+- * ipt_ecn.h,v 1.4 2002/08/05 19:39:00 laforge Exp
+-*/
+-#ifndef _IPT_ECN_H
+-#define _IPT_ECN_H
+-
+-#include <linux/types.h>
+-#include <linux/netfilter/xt_dscp.h>
+-
+-#define IPT_ECN_IP_MASK	(~XT_DSCP_MASK)
+-
+-#define IPT_ECN_OP_MATCH_IP	0x01
+-#define IPT_ECN_OP_MATCH_ECE	0x10
+-#define IPT_ECN_OP_MATCH_CWR	0x20
+-
+-#define IPT_ECN_OP_MATCH_MASK	0xce
+-
+-/* match info */
+-struct ipt_ecn_info {
+-	__u8 operation;
+-	__u8 invert;
+-	__u8 ip_ect;
+-	union {
+-		struct {
+-			__u8 ect;
+-		} tcp;
+-	} proto;
+-};
+-
+-#endif /* _IPT_ECN_H */
+diff -Naur linux-3.0.54/include/linux/netfilter_ipv4/ipt_ECN.h linux-3.0.54_1/include/linux/netfilter_ipv4/ipt_ECN.h
+--- linux-3.0.54/include/linux/netfilter_ipv4/ipt_ECN.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter_ipv4/ipt_ECN.h	2012-12-03 12:59:38.000000000 -0800
+@@ -1,33 +1,35 @@
+-/* Header file for iptables ipt_ECN target
++/* iptables module for matching the ECN header in IPv4 and TCP header
+  *
+- * (C) 2002 by Harald Welte <laforge@gnumonks.org>
++ * (C) 2002 Harald Welte <laforge@gnumonks.org>
+  *
+  * This software is distributed under GNU GPL v2, 1991
+  * 
+- * ipt_ECN.h,v 1.3 2002/05/29 12:17:40 laforge Exp
++ * ipt_ecn.h,v 1.4 2002/08/05 19:39:00 laforge Exp
+ */
+-#ifndef _IPT_ECN_TARGET_H
+-#define _IPT_ECN_TARGET_H
++#ifndef _IPT_ECN_H
++#define _IPT_ECN_H
+ 
+ #include <linux/types.h>
+-#include <linux/netfilter/xt_DSCP.h>
++#include <linux/netfilter/xt_dscp.h>
+ 
+ #define IPT_ECN_IP_MASK	(~XT_DSCP_MASK)
+ 
+-#define IPT_ECN_OP_SET_IP	0x01	/* set ECN bits of IPv4 header */
+-#define IPT_ECN_OP_SET_ECE	0x10	/* set ECE bit of TCP header */
+-#define IPT_ECN_OP_SET_CWR	0x20	/* set CWR bit of TCP header */
+-
+-#define IPT_ECN_OP_MASK		0xce
+-
+-struct ipt_ECN_info {
+-	__u8 operation;	/* bitset of operations */
+-	__u8 ip_ect;	/* ECT codepoint of IPv4 header, pre-shifted */
++#define IPT_ECN_OP_MATCH_IP	0x01
++#define IPT_ECN_OP_MATCH_ECE	0x10
++#define IPT_ECN_OP_MATCH_CWR	0x20
++
++#define IPT_ECN_OP_MATCH_MASK	0xce
++
++/* match info */
++struct ipt_ecn_info {
++	__u8 operation;
++	__u8 invert;
++	__u8 ip_ect;
+ 	union {
+ 		struct {
+-			__u8 ece:1, cwr:1; /* TCP ECT bits */
++			__u8 ect;
+ 		} tcp;
+ 	} proto;
+ };
+ 
+-#endif /* _IPT_ECN_TARGET_H */
++#endif /* _IPT_ECN_H */
+diff -Naur linux-3.0.54/include/linux/netfilter_ipv4/ipt_ttl.h linux-3.0.54_1/include/linux/netfilter_ipv4/ipt_ttl.h
+--- linux-3.0.54/include/linux/netfilter_ipv4/ipt_ttl.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter_ipv4/ipt_ttl.h	2012-12-03 12:59:38.000000000 -0800
+@@ -1,5 +1,5 @@
+-/* IP tables module for matching the value of the TTL
+- * (C) 2000 by Harald Welte <laforge@gnumonks.org> */
++/* TTL modification module for IP tables
++ * (C) 2000 by Harald Welte <laforge@netfilter.org> */
+ 
+ #ifndef _IPT_TTL_H
+ #define _IPT_TTL_H
+@@ -7,14 +7,14 @@
+ #include <linux/types.h>
+ 
+ enum {
+-	IPT_TTL_EQ = 0,		/* equals */
+-	IPT_TTL_NE,		/* not equals */
+-	IPT_TTL_LT,		/* less than */
+-	IPT_TTL_GT,		/* greater than */
++	IPT_TTL_SET = 0,
++	IPT_TTL_INC,
++	IPT_TTL_DEC
+ };
+ 
++#define IPT_TTL_MAXMODE	IPT_TTL_DEC
+ 
+-struct ipt_ttl_info {
++struct ipt_TTL_info {
+ 	__u8	mode;
+ 	__u8	ttl;
+ };
+diff -Naur linux-3.0.54/include/linux/netfilter_ipv4/ipt_TTL.h linux-3.0.54_1/include/linux/netfilter_ipv4/ipt_TTL.h
+--- linux-3.0.54/include/linux/netfilter_ipv4/ipt_TTL.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter_ipv4/ipt_TTL.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,23 +0,0 @@
+-/* TTL modification module for IP tables
+- * (C) 2000 by Harald Welte <laforge@netfilter.org> */
+-
+-#ifndef _IPT_TTL_H
+-#define _IPT_TTL_H
+-
+-#include <linux/types.h>
+-
+-enum {
+-	IPT_TTL_SET = 0,
+-	IPT_TTL_INC,
+-	IPT_TTL_DEC
+-};
+-
+-#define IPT_TTL_MAXMODE	IPT_TTL_DEC
+-
+-struct ipt_TTL_info {
+-	__u8	mode;
+-	__u8	ttl;
+-};
+-
+-
+-#endif
+diff -Naur linux-3.0.54/include/linux/netfilter_ipv6/ip6t_hl.h linux-3.0.54_1/include/linux/netfilter_ipv6/ip6t_hl.h
+--- linux-3.0.54/include/linux/netfilter_ipv6/ip6t_hl.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter_ipv6/ip6t_hl.h	1969-12-31 16:00:00.000000000 -0800
+@@ -1,24 +0,0 @@
+-/* ip6tables module for matching the Hop Limit value
+- * Maciej Soltysiak <solt@dns.toxicfilms.tv>
+- * Based on HW's ttl module */
+-
+-#ifndef _IP6T_HL_H
+-#define _IP6T_HL_H
+-
+-#include <linux/types.h>
+-
+-enum {
+-	IP6T_HL_EQ = 0,		/* equals */
+-	IP6T_HL_NE,		/* not equals */
+-	IP6T_HL_LT,		/* less than */
+-	IP6T_HL_GT,		/* greater than */
+-};
+-
+-
+-struct ip6t_hl_info {
+-	__u8	mode;
+-	__u8	hop_limit;
+-};
+-
+-
+-#endif
+diff -Naur linux-3.0.54/include/linux/netfilter_ipv6/ip6t_HL.h linux-3.0.54_1/include/linux/netfilter_ipv6/ip6t_HL.h
+--- linux-3.0.54/include/linux/netfilter_ipv6/ip6t_HL.h	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/include/linux/netfilter_ipv6/ip6t_HL.h	2012-12-03 12:59:38.000000000 -0800
+@@ -1,6 +1,6 @@
+-/* Hop Limit modification module for ip6tables
++/* ip6tables module for matching the Hop Limit value
+  * Maciej Soltysiak <solt@dns.toxicfilms.tv>
+- * Based on HW's TTL module */
++ * Based on HW's ttl module */
+ 
+ #ifndef _IP6T_HL_H
+ #define _IP6T_HL_H
+@@ -8,14 +8,14 @@
+ #include <linux/types.h>
+ 
+ enum {
+-	IP6T_HL_SET = 0,
+-	IP6T_HL_INC,
+-	IP6T_HL_DEC
++	IP6T_HL_EQ = 0,		/* equals */
++	IP6T_HL_NE,		/* not equals */
++	IP6T_HL_LT,		/* less than */
++	IP6T_HL_GT,		/* greater than */
+ };
+ 
+-#define IP6T_HL_MAXMODE	IP6T_HL_DEC
+ 
+-struct ip6t_HL_info {
++struct ip6t_hl_info {
+ 	__u8	mode;
+ 	__u8	hop_limit;
+ };
+diff -Naur linux-3.0.54/include/linux/s3c_driver.h linux-3.0.54_1/include/linux/s3c_driver.h
+--- linux-3.0.54/include/linux/s3c_driver.h	1969-12-31 16:00:00.000000000 -0800
++++ linux-3.0.54_1/include/linux/s3c_driver.h	2017-04-04 22:04:26.073909124 -0800
+@@ -0,0 +1,139 @@
++/********************************************************************************
++ *      Copyright:  (C) 2017 qicheng
++ *                  All rights reserved.
++ *
++ *       Filename:  s3c_driver.h
++ *    Description:  This head file 
++ *
++ *        Version:  1.0.0(04/04/2017)
++ *         Author:  yangni <497049229@qq.com>
++ *      ChangeLog:  1, Release initial version on "04/04/2017 09:41:50 PM"
++ *                 
++ *
++ *****************************************************************************/                 
++#ifndef __S3C_DRIVER_H
++#define __S3C_DRIVER_H
++
++#include <linux/version.h>
++#include <linux/kernel.h>
++#include <linux/errno.h>
++#include <linux/init.h>
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <linux/kref.h>
++#include <linux/spinlock.h>
++#include <asm/uaccess.h>
++#include <linux/mutex.h>
++#include <linux/delay.h>
++#include <linux/fs.h>
++#include <linux/device.h>
++#include <linux/i2c.h>
++#include <linux/string.h>
++#include <linux/bcd.h>
++#include <linux/miscdevice.h>
++#include <linux/poll.h>
++#include <linux/irq.h>
++#include <linux/interrupt.h>
++#include <linux/sysfs.h>
++#include <linux/proc_fs.h>
++#include <linux/rtc.h>
++#include <linux/spinlock.h>
++#include <linux/usb.h>
++#include <asm/uaccess.h>
++#include <asm/delay.h>
++#include <linux/syscalls.h>  
++#include <linux/platform_device.h>
++#include <linux/unistd.h>
++#include <linux/tty.h>
++#include <linux/tty_flip.h>
++#include <linux/serial.h>
++#include <linux/serial_core.h>
++#include <linux/irq.h>
++#include <mach/regs-gpio.h>
++
++
++#if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,32)
++#include <mach/hardware.h>
++#include <mach/gpio.h>
++#include <asm/irq.h>
++#else 
++#include <asm-arm/irq.h>
++#include <asm/arch/gpio.h>
++#include <asm/arch/hardware.h>
++#endif
++#include "plat_ioctl.h"
++
++/* ===========================================================================
++ *         S3C24XX device driver common macro definition 
++ *===========================================================================*/
++
++#define ENPULLUP                    1
++#define DISPULLUP                   0
++
++#define HIGHLEVEL                   1
++#define LOWLEVEL                    0
++
++#define INPUT                       1
++#define OUTPUT                      0
++
++#define OFF                         0
++#define ON                          1
++
++#define ENABLE                      1
++#define DISABLE                     0
++
++#define TRUE                        1
++#define FALSE                       0
++
++/* ===========================================================================
++ *         S3C24XX device driver name and Major number define 
++ *===========================================================================*/
++
++
++#define DEV_LED_NAME                "led"
++#define DEV_LED_MAJOR               203
++
++#define DEV_BUTTON_NAME             "button"
++#define DEV_BUTTON_MAJOR            "211"
++
++#define DEV_ADC_NAME                "adc"
++#define DEV_ADC_MAJOR               "212"
++
++/*  ***** Bit Operate Define *****/
++#define SET_BIT(data, i)   ((data) |=  (1 << (i)))    /*   Set the bit "i" in "data" to 1  */
++#define CLR_BIT(data, i)   ((data) &= ~(1 << (i)))    /*   Clear the bit "i" in "data" to 0 */
++#define NOT_BIT(data, i)   ((data) ^=  (1 << (i)))    /*   Inverse the bit "i" in "data"  */
++#define GET_BIT(data, i)   ((data) >> (i) & 1)        /*   Get the value of bit "i"  in "data" */
++#define L_SHIFT(data, i)   ((data) << (i))            /*   Shift "data" left for "i" bit  */
++#define R_SHIFT(data, i)   ((data) >> (i))            /*   Shift "data" Right for "i" bit  */
++
++
++/* ===========================================================================
++ *         S3C24XX device driver common function definition 
++ *===========================================================================*/
++
++#define SLEEP(x)    {DECLARE_WAIT_QUEUE_HEAD (stSleep); if (10 > x) mdelay ((x * 1000)); \
++                        else wait_event_interruptible_timeout (stSleep, 0, (x / 10));}
++
++#define VERSION_CODE(a,b,c)       ( ((a)<<16) + ((b)<<8) + (c))
++#define DRV_VERSION               VERSION_CODE(DRV_MAJOR_VER, DRV_MINOR_VER, DRV_REVER_VER)
++#define MAJOR_VER(a)              ((a)>>16&0xFF)
++#define MINOR_VER(a)              ((a)>>8&0xFF)
++#define REVER_VER(a)              ((a)&0xFF)
++
++#define dbg_print(format,args...) if(DISABLE!=debug) \
++        {printk("[kernel] ");printk(format, ##args);}    
++
++static inline void print_version(int version)
++{
++#ifdef __KERNEL__
++        printk("%d.%d.%d\n", MAJOR_VER(version), MINOR_VER(version), REVER_VER(version));
++#else
++        printf("%d.%d.%d\n", MAJOR_VER(version), MINOR_VER(version), REVER_VER(version));
++#endif
++}
++
++
++#endif /* __S3C_DRIVER_H */
++
++
+diff -Naur linux-3.0.54/include/linux/s3c_ioctl.h linux-3.0.54_1/include/linux/s3c_ioctl.h
+--- linux-3.0.54/include/linux/s3c_ioctl.h	1969-12-31 16:00:00.000000000 -0800
++++ linux-3.0.54_1/include/linux/s3c_ioctl.h	2017-04-04 22:04:48.168900616 -0800
+@@ -0,0 +1,72 @@
++/********************************************************************************
++ *      Copyright:  (C) 2017 qicheng
++ *                  All rights reserved.
++ *
++ *       Filename:  s3c_ioctl.h
++ *    Description:  This head file 
++ *
++ *        Version:  1.0.0(04/04/2017)
++ *         Author:  yangni <497049229@qq.com>
++ *      ChangeLog:  1, Release initial version on "04/04/2017 09:43:39 PM"
++ *                 
++ ********************************************************************************/
++
++#ifndef __PLAT_IOCTL_H
++#define __PLAT_IOCTL_H
++
++#include <asm/ioctl.h>
++
++/*===========================================================================
++ *                Common ioctl command definition 
++ *===========================================================================*/
++
++#define PLATDRV_MAGIC           0x60
++
++/*===========================================================================
++ *                 ioctl command for all the drivers 0x01~0x0F
++ *===========================================================================*/
++
++/*args is enable or disable*/
++#define SET_DRV_DEBUG               _IO (PLATDRV_MAGIC, 0x01)
++#define GET_DRV_VER                 _IO (PLATDRV_MAGIC, 0x02)
++
++/*===========================================================================
++ *                 ioctl command for few ioctl() cmd driver 0x10~0x2F
++ *===========================================================================*/
++
++/* LED driver */
++#define LED_OFF                     _IO (PLATDRV_MAGIC, 0x18)
++#define LED_ON                      _IO (PLATDRV_MAGIC, 0x19)
++#define LED_BLINK                   _IO (PLATDRV_MAGIC, 0x1A)
++#define ADC_SET_CHANNEL             _IO (PLATDRV_MAGIC, 0x1B)
++
++/*===========================================================================
++ *                   ioctl command for GPRS driver 0x30~0x4F
++ *===========================================================================*/
++#define GPRS_POWERDOWN              _IO (PLATDRV_MAGIC, 0x30)
++#define GPRS_POWERON                _IO (PLATDRV_MAGIC, 0x31)
++#define GPRS_RESET                  _IO (PLATDRV_MAGIC, 0x32)
++#define GPRS_POWERMON               _IO (PLATDRV_MAGIC, 0x33)
++#define GPRS_CHK_SIMDOOR            _IO (PLATDRV_MAGIC, 0x36)
++#define GPRS_SET_DTR                _IO (PLATDRV_MAGIC, 0x37)
++#define GPRS_SET_RTS                _IO (PLATDRV_MAGIC, 0x38)
++#define GPRS_GET_RING               _IO (PLATDRV_MAGIC, 0x39)
++#define SET_PWUP_TIME               _IO (PLATDRV_MAGIC, 0x3A)
++#define SET_PWDOWN_TIME             _IO (PLATDRV_MAGIC, 0x3B)
++#define SET_RESET_TIME              _IO (PLATDRV_MAGIC, 0x3C)
++#define GPRS_CHK_MODEL              _IO (PLATDRV_MAGIC, 0x3E) 
++
++/*===========================================================================
++ *                   ioctl command for EEPROM driver 0x50~0x5F
++ *===========================================================================*/
++#define LL_POWEROFF                 _IO (PLATDRV_MAGIC, 0x50)
++#define LL_POWERON                  _IO (PLATDRV_MAGIC, 0x51)
++#define LL_STOP                     _IO (PLATDRV_MAGIC, 0x52)
++#define LL_START                    _IO (PLATDRV_MAGIC, 0x53)
++#define LL_READ                     _IO (PLATDRV_MAGIC, 0x54)
++#define LL_WRITE                    _IO (PLATDRV_MAGIC, 0x55)
++#define LL_DATALOW                  _IO (PLATDRV_MAGIC, 0x56)
++#define LL_ACKNAK                   _IO (PLATDRV_MAGIC, 0x57)
++
++
++#endif                          /* __PLAT_IOCTL_H */
+diff -Naur linux-3.0.54/Makefile linux-3.0.54_1/Makefile
+--- linux-3.0.54/Makefile	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/Makefile	2017-04-05 12:53:34.135922487 -0800
+@@ -192,8 +192,12 @@
+ # Default value for CROSS_COMPILE is not to prefix executables
+ # Note: Some architectures assign CROSS_COMPILE in their arch/*/Makefile
+ export KBUILD_BUILDHOST := $(SUBARCH)
+-ARCH		?= $(SUBARCH)
+-CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)
++
++#/***ARCH		?= $(SUBARCH)
++#CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)*/
++
++ARCH       ?=arm
++CROSS_COMPILE  ?=/opt/buildroot-2012.08/arm920t/usr/bin/arm-linux-
+ 
+ # Architecture as present in compile.h
+ UTS_MACHINE 	:= $(ARCH)
+@@ -557,6 +561,10 @@
+ # This allow a user to issue only 'make' to build a kernel including modules
+ # Defaults to vmlinux, but the arch makefile usually adds further targets
+ all: vmlinux
++	cp arch/arm/boot/zImage . -f 
++	mkimage -A arm -O linux -T kernel -C none -a 30008040 -n "Linux Kernel" -d zImage \linuxrom-s3c2440.bin
++	rm -f zImage
++
+ 
+ ifdef CONFIG_CC_OPTIMIZE_FOR_SIZE
+ KBUILD_CFLAGS	+= -Os
+@@ -1202,6 +1210,8 @@
+ 		-o -name '*%' -o -name '.*.cmd' -o -name 'core' \) \
+ 		-type f -print | xargs rm -f
+ 
++	@rm -f linuxrom-s3c2440.bin
++
+ 
+ # Packaging of the kernel to various formats
+ # ---------------------------------------------------------------------------
+diff -Naur linux-3.0.54/net/ipv4/netfilter/ipt_ecn.c linux-3.0.54_1/net/ipv4/netfilter/ipt_ecn.c
+--- linux-3.0.54/net/ipv4/netfilter/ipt_ecn.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/ipv4/netfilter/ipt_ecn.c	2012-12-03 12:59:38.000000000 -0800
+@@ -1,127 +1,138 @@
+-/* IP tables module for matching the value of the IPv4 and TCP ECN bits
++/* iptables module for the IPv4 and TCP ECN bits, Version 1.5
+  *
+- * (C) 2002 by Harald Welte <laforge@gnumonks.org>
++ * (C) 2002 by Harald Welte <laforge@netfilter.org>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+  * published by the Free Software Foundation.
+- */
++*/
+ #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+ #include <linux/in.h>
+-#include <linux/ip.h>
+-#include <net/ip.h>
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
++#include <linux/ip.h>
++#include <net/ip.h>
+ #include <linux/tcp.h>
++#include <net/checksum.h>
+ 
+ #include <linux/netfilter/x_tables.h>
+ #include <linux/netfilter_ipv4/ip_tables.h>
+-#include <linux/netfilter_ipv4/ipt_ecn.h>
++#include <linux/netfilter_ipv4/ipt_ECN.h>
+ 
+-MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
+-MODULE_DESCRIPTION("Xtables: Explicit Congestion Notification (ECN) flag match for IPv4");
+ MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
++MODULE_DESCRIPTION("Xtables: Explicit Congestion Notification (ECN) flag modification");
+ 
+-static inline bool match_ip(const struct sk_buff *skb,
+-			    const struct ipt_ecn_info *einfo)
+-{
+-	return ((ip_hdr(skb)->tos & IPT_ECN_IP_MASK) == einfo->ip_ect) ^
+-	       !!(einfo->invert & IPT_ECN_OP_MATCH_IP);
++/* set ECT codepoint from IP header.
++ * 	return false if there was an error. */
++static inline bool
++set_ect_ip(struct sk_buff *skb, const struct ipt_ECN_info *einfo)
++{
++	struct iphdr *iph = ip_hdr(skb);
++
++	if ((iph->tos & IPT_ECN_IP_MASK) != (einfo->ip_ect & IPT_ECN_IP_MASK)) {
++		__u8 oldtos;
++		if (!skb_make_writable(skb, sizeof(struct iphdr)))
++			return false;
++		iph = ip_hdr(skb);
++		oldtos = iph->tos;
++		iph->tos &= ~IPT_ECN_IP_MASK;
++		iph->tos |= (einfo->ip_ect & IPT_ECN_IP_MASK);
++		csum_replace2(&iph->check, htons(oldtos), htons(iph->tos));
++	}
++	return true;
+ }
+ 
+-static inline bool match_tcp(const struct sk_buff *skb,
+-			     const struct ipt_ecn_info *einfo,
+-			     bool *hotdrop)
+-{
+-	struct tcphdr _tcph;
+-	const struct tcphdr *th;
+-
+-	/* In practice, TCP match does this, so can't fail.  But let's
+-	 * be good citizens.
+-	 */
+-	th = skb_header_pointer(skb, ip_hdrlen(skb), sizeof(_tcph), &_tcph);
+-	if (th == NULL) {
+-		*hotdrop = false;
++/* Return false if there was an error. */
++static inline bool
++set_ect_tcp(struct sk_buff *skb, const struct ipt_ECN_info *einfo)
++{
++	struct tcphdr _tcph, *tcph;
++	__be16 oldval;
++
++	/* Not enough header? */
++	tcph = skb_header_pointer(skb, ip_hdrlen(skb), sizeof(_tcph), &_tcph);
++	if (!tcph)
+ 		return false;
+-	}
+ 
+-	if (einfo->operation & IPT_ECN_OP_MATCH_ECE) {
+-		if (einfo->invert & IPT_ECN_OP_MATCH_ECE) {
+-			if (th->ece == 1)
+-				return false;
+-		} else {
+-			if (th->ece == 0)
+-				return false;
+-		}
+-	}
++	if ((!(einfo->operation & IPT_ECN_OP_SET_ECE) ||
++	     tcph->ece == einfo->proto.tcp.ece) &&
++	    (!(einfo->operation & IPT_ECN_OP_SET_CWR) ||
++	     tcph->cwr == einfo->proto.tcp.cwr))
++		return true;
+ 
+-	if (einfo->operation & IPT_ECN_OP_MATCH_CWR) {
+-		if (einfo->invert & IPT_ECN_OP_MATCH_CWR) {
+-			if (th->cwr == 1)
+-				return false;
+-		} else {
+-			if (th->cwr == 0)
+-				return false;
+-		}
+-	}
++	if (!skb_make_writable(skb, ip_hdrlen(skb) + sizeof(*tcph)))
++		return false;
++	tcph = (void *)ip_hdr(skb) + ip_hdrlen(skb);
++
++	oldval = ((__be16 *)tcph)[6];
++	if (einfo->operation & IPT_ECN_OP_SET_ECE)
++		tcph->ece = einfo->proto.tcp.ece;
++	if (einfo->operation & IPT_ECN_OP_SET_CWR)
++		tcph->cwr = einfo->proto.tcp.cwr;
+ 
++	inet_proto_csum_replace2(&tcph->check, skb,
++				 oldval, ((__be16 *)tcph)[6], 0);
+ 	return true;
+ }
+ 
+-static bool ecn_mt(const struct sk_buff *skb, struct xt_action_param *par)
++static unsigned int
++ecn_tg(struct sk_buff *skb, const struct xt_action_param *par)
+ {
+-	const struct ipt_ecn_info *info = par->matchinfo;
++	const struct ipt_ECN_info *einfo = par->targinfo;
+ 
+-	if (info->operation & IPT_ECN_OP_MATCH_IP)
+-		if (!match_ip(skb, info))
+-			return false;
++	if (einfo->operation & IPT_ECN_OP_SET_IP)
++		if (!set_ect_ip(skb, einfo))
++			return NF_DROP;
+ 
+-	if (info->operation & (IPT_ECN_OP_MATCH_ECE|IPT_ECN_OP_MATCH_CWR)) {
+-		if (!match_tcp(skb, info, &par->hotdrop))
+-			return false;
+-	}
++	if (einfo->operation & (IPT_ECN_OP_SET_ECE | IPT_ECN_OP_SET_CWR) &&
++	    ip_hdr(skb)->protocol == IPPROTO_TCP)
++		if (!set_ect_tcp(skb, einfo))
++			return NF_DROP;
+ 
+-	return true;
++	return XT_CONTINUE;
+ }
+ 
+-static int ecn_mt_check(const struct xt_mtchk_param *par)
++static int ecn_tg_check(const struct xt_tgchk_param *par)
+ {
+-	const struct ipt_ecn_info *info = par->matchinfo;
+-	const struct ipt_ip *ip = par->entryinfo;
++	const struct ipt_ECN_info *einfo = par->targinfo;
++	const struct ipt_entry *e = par->entryinfo;
+ 
+-	if (info->operation & IPT_ECN_OP_MATCH_MASK)
++	if (einfo->operation & IPT_ECN_OP_MASK) {
++		pr_info("unsupported ECN operation %x\n", einfo->operation);
+ 		return -EINVAL;
+-
+-	if (info->invert & IPT_ECN_OP_MATCH_MASK)
++	}
++	if (einfo->ip_ect & ~IPT_ECN_IP_MASK) {
++		pr_info("new ECT codepoint %x out of mask\n", einfo->ip_ect);
+ 		return -EINVAL;
+-
+-	if (info->operation & (IPT_ECN_OP_MATCH_ECE|IPT_ECN_OP_MATCH_CWR) &&
+-	    (ip->proto != IPPROTO_TCP || ip->invflags & IPT_INV_PROTO)) {
+-		pr_info("cannot match TCP bits in rule for non-tcp packets\n");
++	}
++	if ((einfo->operation & (IPT_ECN_OP_SET_ECE|IPT_ECN_OP_SET_CWR)) &&
++	    (e->ip.proto != IPPROTO_TCP || (e->ip.invflags & XT_INV_PROTO))) {
++		pr_info("cannot use TCP operations on a non-tcp rule\n");
+ 		return -EINVAL;
+ 	}
+-
+ 	return 0;
+ }
+ 
+-static struct xt_match ecn_mt_reg __read_mostly = {
+-	.name		= "ecn",
++static struct xt_target ecn_tg_reg __read_mostly = {
++	.name		= "ECN",
+ 	.family		= NFPROTO_IPV4,
+-	.match		= ecn_mt,
+-	.matchsize	= sizeof(struct ipt_ecn_info),
+-	.checkentry	= ecn_mt_check,
++	.target		= ecn_tg,
++	.targetsize	= sizeof(struct ipt_ECN_info),
++	.table		= "mangle",
++	.checkentry	= ecn_tg_check,
+ 	.me		= THIS_MODULE,
+ };
+ 
+-static int __init ecn_mt_init(void)
++static int __init ecn_tg_init(void)
+ {
+-	return xt_register_match(&ecn_mt_reg);
++	return xt_register_target(&ecn_tg_reg);
+ }
+ 
+-static void __exit ecn_mt_exit(void)
++static void __exit ecn_tg_exit(void)
+ {
+-	xt_unregister_match(&ecn_mt_reg);
++	xt_unregister_target(&ecn_tg_reg);
+ }
+ 
+-module_init(ecn_mt_init);
+-module_exit(ecn_mt_exit);
++module_init(ecn_tg_init);
++module_exit(ecn_tg_exit);
+diff -Naur linux-3.0.54/net/ipv4/netfilter/ipt_ECN.c linux-3.0.54_1/net/ipv4/netfilter/ipt_ECN.c
+--- linux-3.0.54/net/ipv4/netfilter/ipt_ECN.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/ipv4/netfilter/ipt_ECN.c	1969-12-31 16:00:00.000000000 -0800
+@@ -1,138 +0,0 @@
+-/* iptables module for the IPv4 and TCP ECN bits, Version 1.5
+- *
+- * (C) 2002 by Harald Welte <laforge@netfilter.org>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 as
+- * published by the Free Software Foundation.
+-*/
+-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+-#include <linux/in.h>
+-#include <linux/module.h>
+-#include <linux/skbuff.h>
+-#include <linux/ip.h>
+-#include <net/ip.h>
+-#include <linux/tcp.h>
+-#include <net/checksum.h>
+-
+-#include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter_ipv4/ip_tables.h>
+-#include <linux/netfilter_ipv4/ipt_ECN.h>
+-
+-MODULE_LICENSE("GPL");
+-MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
+-MODULE_DESCRIPTION("Xtables: Explicit Congestion Notification (ECN) flag modification");
+-
+-/* set ECT codepoint from IP header.
+- * 	return false if there was an error. */
+-static inline bool
+-set_ect_ip(struct sk_buff *skb, const struct ipt_ECN_info *einfo)
+-{
+-	struct iphdr *iph = ip_hdr(skb);
+-
+-	if ((iph->tos & IPT_ECN_IP_MASK) != (einfo->ip_ect & IPT_ECN_IP_MASK)) {
+-		__u8 oldtos;
+-		if (!skb_make_writable(skb, sizeof(struct iphdr)))
+-			return false;
+-		iph = ip_hdr(skb);
+-		oldtos = iph->tos;
+-		iph->tos &= ~IPT_ECN_IP_MASK;
+-		iph->tos |= (einfo->ip_ect & IPT_ECN_IP_MASK);
+-		csum_replace2(&iph->check, htons(oldtos), htons(iph->tos));
+-	}
+-	return true;
+-}
+-
+-/* Return false if there was an error. */
+-static inline bool
+-set_ect_tcp(struct sk_buff *skb, const struct ipt_ECN_info *einfo)
+-{
+-	struct tcphdr _tcph, *tcph;
+-	__be16 oldval;
+-
+-	/* Not enough header? */
+-	tcph = skb_header_pointer(skb, ip_hdrlen(skb), sizeof(_tcph), &_tcph);
+-	if (!tcph)
+-		return false;
+-
+-	if ((!(einfo->operation & IPT_ECN_OP_SET_ECE) ||
+-	     tcph->ece == einfo->proto.tcp.ece) &&
+-	    (!(einfo->operation & IPT_ECN_OP_SET_CWR) ||
+-	     tcph->cwr == einfo->proto.tcp.cwr))
+-		return true;
+-
+-	if (!skb_make_writable(skb, ip_hdrlen(skb) + sizeof(*tcph)))
+-		return false;
+-	tcph = (void *)ip_hdr(skb) + ip_hdrlen(skb);
+-
+-	oldval = ((__be16 *)tcph)[6];
+-	if (einfo->operation & IPT_ECN_OP_SET_ECE)
+-		tcph->ece = einfo->proto.tcp.ece;
+-	if (einfo->operation & IPT_ECN_OP_SET_CWR)
+-		tcph->cwr = einfo->proto.tcp.cwr;
+-
+-	inet_proto_csum_replace2(&tcph->check, skb,
+-				 oldval, ((__be16 *)tcph)[6], 0);
+-	return true;
+-}
+-
+-static unsigned int
+-ecn_tg(struct sk_buff *skb, const struct xt_action_param *par)
+-{
+-	const struct ipt_ECN_info *einfo = par->targinfo;
+-
+-	if (einfo->operation & IPT_ECN_OP_SET_IP)
+-		if (!set_ect_ip(skb, einfo))
+-			return NF_DROP;
+-
+-	if (einfo->operation & (IPT_ECN_OP_SET_ECE | IPT_ECN_OP_SET_CWR) &&
+-	    ip_hdr(skb)->protocol == IPPROTO_TCP)
+-		if (!set_ect_tcp(skb, einfo))
+-			return NF_DROP;
+-
+-	return XT_CONTINUE;
+-}
+-
+-static int ecn_tg_check(const struct xt_tgchk_param *par)
+-{
+-	const struct ipt_ECN_info *einfo = par->targinfo;
+-	const struct ipt_entry *e = par->entryinfo;
+-
+-	if (einfo->operation & IPT_ECN_OP_MASK) {
+-		pr_info("unsupported ECN operation %x\n", einfo->operation);
+-		return -EINVAL;
+-	}
+-	if (einfo->ip_ect & ~IPT_ECN_IP_MASK) {
+-		pr_info("new ECT codepoint %x out of mask\n", einfo->ip_ect);
+-		return -EINVAL;
+-	}
+-	if ((einfo->operation & (IPT_ECN_OP_SET_ECE|IPT_ECN_OP_SET_CWR)) &&
+-	    (e->ip.proto != IPPROTO_TCP || (e->ip.invflags & XT_INV_PROTO))) {
+-		pr_info("cannot use TCP operations on a non-tcp rule\n");
+-		return -EINVAL;
+-	}
+-	return 0;
+-}
+-
+-static struct xt_target ecn_tg_reg __read_mostly = {
+-	.name		= "ECN",
+-	.family		= NFPROTO_IPV4,
+-	.target		= ecn_tg,
+-	.targetsize	= sizeof(struct ipt_ECN_info),
+-	.table		= "mangle",
+-	.checkentry	= ecn_tg_check,
+-	.me		= THIS_MODULE,
+-};
+-
+-static int __init ecn_tg_init(void)
+-{
+-	return xt_register_target(&ecn_tg_reg);
+-}
+-
+-static void __exit ecn_tg_exit(void)
+-{
+-	xt_unregister_target(&ecn_tg_reg);
+-}
+-
+-module_init(ecn_tg_init);
+-module_exit(ecn_tg_exit);
+diff -Naur linux-3.0.54/net/netfilter/xt_dscp.c linux-3.0.54_1/net/netfilter/xt_dscp.c
+--- linux-3.0.54/net/netfilter/xt_dscp.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/netfilter/xt_dscp.c	1969-12-31 16:00:00.000000000 -0800
+@@ -1,115 +0,0 @@
+-/* IP tables module for matching the value of the IPv4/IPv6 DSCP field
+- *
+- * (C) 2002 by Harald Welte <laforge@netfilter.org>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 as
+- * published by the Free Software Foundation.
+- */
+-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+-#include <linux/module.h>
+-#include <linux/skbuff.h>
+-#include <linux/ip.h>
+-#include <linux/ipv6.h>
+-#include <net/dsfield.h>
+-
+-#include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter/xt_dscp.h>
+-
+-MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
+-MODULE_DESCRIPTION("Xtables: DSCP/TOS field match");
+-MODULE_LICENSE("GPL");
+-MODULE_ALIAS("ipt_dscp");
+-MODULE_ALIAS("ip6t_dscp");
+-MODULE_ALIAS("ipt_tos");
+-MODULE_ALIAS("ip6t_tos");
+-
+-static bool
+-dscp_mt(const struct sk_buff *skb, struct xt_action_param *par)
+-{
+-	const struct xt_dscp_info *info = par->matchinfo;
+-	u_int8_t dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+-
+-	return (dscp == info->dscp) ^ !!info->invert;
+-}
+-
+-static bool
+-dscp_mt6(const struct sk_buff *skb, struct xt_action_param *par)
+-{
+-	const struct xt_dscp_info *info = par->matchinfo;
+-	u_int8_t dscp = ipv6_get_dsfield(ipv6_hdr(skb)) >> XT_DSCP_SHIFT;
+-
+-	return (dscp == info->dscp) ^ !!info->invert;
+-}
+-
+-static int dscp_mt_check(const struct xt_mtchk_param *par)
+-{
+-	const struct xt_dscp_info *info = par->matchinfo;
+-
+-	if (info->dscp > XT_DSCP_MAX) {
+-		pr_info("dscp %x out of range\n", info->dscp);
+-		return -EDOM;
+-	}
+-
+-	return 0;
+-}
+-
+-static bool tos_mt(const struct sk_buff *skb, struct xt_action_param *par)
+-{
+-	const struct xt_tos_match_info *info = par->matchinfo;
+-
+-	if (par->family == NFPROTO_IPV4)
+-		return ((ip_hdr(skb)->tos & info->tos_mask) ==
+-		       info->tos_value) ^ !!info->invert;
+-	else
+-		return ((ipv6_get_dsfield(ipv6_hdr(skb)) & info->tos_mask) ==
+-		       info->tos_value) ^ !!info->invert;
+-}
+-
+-static struct xt_match dscp_mt_reg[] __read_mostly = {
+-	{
+-		.name		= "dscp",
+-		.family		= NFPROTO_IPV4,
+-		.checkentry	= dscp_mt_check,
+-		.match		= dscp_mt,
+-		.matchsize	= sizeof(struct xt_dscp_info),
+-		.me		= THIS_MODULE,
+-	},
+-	{
+-		.name		= "dscp",
+-		.family		= NFPROTO_IPV6,
+-		.checkentry	= dscp_mt_check,
+-		.match		= dscp_mt6,
+-		.matchsize	= sizeof(struct xt_dscp_info),
+-		.me		= THIS_MODULE,
+-	},
+-	{
+-		.name		= "tos",
+-		.revision	= 1,
+-		.family		= NFPROTO_IPV4,
+-		.match		= tos_mt,
+-		.matchsize	= sizeof(struct xt_tos_match_info),
+-		.me		= THIS_MODULE,
+-	},
+-	{
+-		.name		= "tos",
+-		.revision	= 1,
+-		.family		= NFPROTO_IPV6,
+-		.match		= tos_mt,
+-		.matchsize	= sizeof(struct xt_tos_match_info),
+-		.me		= THIS_MODULE,
+-	},
+-};
+-
+-static int __init dscp_mt_init(void)
+-{
+-	return xt_register_matches(dscp_mt_reg, ARRAY_SIZE(dscp_mt_reg));
+-}
+-
+-static void __exit dscp_mt_exit(void)
+-{
+-	xt_unregister_matches(dscp_mt_reg, ARRAY_SIZE(dscp_mt_reg));
+-}
+-
+-module_init(dscp_mt_init);
+-module_exit(dscp_mt_exit);
+diff -Naur linux-3.0.54/net/netfilter/xt_DSCP.c linux-3.0.54_1/net/netfilter/xt_DSCP.c
+--- linux-3.0.54/net/netfilter/xt_DSCP.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/netfilter/xt_DSCP.c	2012-12-03 12:59:38.000000000 -0800
+@@ -1,14 +1,11 @@
+-/* x_tables module for setting the IPv4/IPv6 DSCP field, Version 1.8
++/* IP tables module for matching the value of the IPv4/IPv6 DSCP field
+  *
+  * (C) 2002 by Harald Welte <laforge@netfilter.org>
+- * based on ipt_FTOS.c (C) 2000 by Matthew G. Marsh <mgm@paktronix.com>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+  * published by the Free Software Foundation.
+- *
+- * See RFC2474 for a description of the DSCP field within the IP Header.
+-*/
++ */
+ #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
+@@ -17,148 +14,102 @@
+ #include <net/dsfield.h>
+ 
+ #include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter/xt_DSCP.h>
++#include <linux/netfilter/xt_dscp.h>
+ 
+ MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
+-MODULE_DESCRIPTION("Xtables: DSCP/TOS field modification");
++MODULE_DESCRIPTION("Xtables: DSCP/TOS field match");
+ MODULE_LICENSE("GPL");
+-MODULE_ALIAS("ipt_DSCP");
+-MODULE_ALIAS("ip6t_DSCP");
+-MODULE_ALIAS("ipt_TOS");
+-MODULE_ALIAS("ip6t_TOS");
++MODULE_ALIAS("ipt_dscp");
++MODULE_ALIAS("ip6t_dscp");
++MODULE_ALIAS("ipt_tos");
++MODULE_ALIAS("ip6t_tos");
+ 
+-static unsigned int
+-dscp_tg(struct sk_buff *skb, const struct xt_action_param *par)
++static bool
++dscp_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	const struct xt_DSCP_info *dinfo = par->targinfo;
++	const struct xt_dscp_info *info = par->matchinfo;
+ 	u_int8_t dscp = ipv4_get_dsfield(ip_hdr(skb)) >> XT_DSCP_SHIFT;
+ 
+-	if (dscp != dinfo->dscp) {
+-		if (!skb_make_writable(skb, sizeof(struct iphdr)))
+-			return NF_DROP;
+-
+-		ipv4_change_dsfield(ip_hdr(skb), (__u8)(~XT_DSCP_MASK),
+-				    dinfo->dscp << XT_DSCP_SHIFT);
+-
+-	}
+-	return XT_CONTINUE;
++	return (dscp == info->dscp) ^ !!info->invert;
+ }
+ 
+-static unsigned int
+-dscp_tg6(struct sk_buff *skb, const struct xt_action_param *par)
++static bool
++dscp_mt6(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	const struct xt_DSCP_info *dinfo = par->targinfo;
++	const struct xt_dscp_info *info = par->matchinfo;
+ 	u_int8_t dscp = ipv6_get_dsfield(ipv6_hdr(skb)) >> XT_DSCP_SHIFT;
+ 
+-	if (dscp != dinfo->dscp) {
+-		if (!skb_make_writable(skb, sizeof(struct ipv6hdr)))
+-			return NF_DROP;
+-
+-		ipv6_change_dsfield(ipv6_hdr(skb), (__u8)(~XT_DSCP_MASK),
+-				    dinfo->dscp << XT_DSCP_SHIFT);
+-	}
+-	return XT_CONTINUE;
++	return (dscp == info->dscp) ^ !!info->invert;
+ }
+ 
+-static int dscp_tg_check(const struct xt_tgchk_param *par)
++static int dscp_mt_check(const struct xt_mtchk_param *par)
+ {
+-	const struct xt_DSCP_info *info = par->targinfo;
++	const struct xt_dscp_info *info = par->matchinfo;
+ 
+ 	if (info->dscp > XT_DSCP_MAX) {
+ 		pr_info("dscp %x out of range\n", info->dscp);
+ 		return -EDOM;
+ 	}
+-	return 0;
+-}
+ 
+-static unsigned int
+-tos_tg(struct sk_buff *skb, const struct xt_action_param *par)
+-{
+-	const struct xt_tos_target_info *info = par->targinfo;
+-	struct iphdr *iph = ip_hdr(skb);
+-	u_int8_t orig, nv;
+-
+-	orig = ipv4_get_dsfield(iph);
+-	nv   = (orig & ~info->tos_mask) ^ info->tos_value;
+-
+-	if (orig != nv) {
+-		if (!skb_make_writable(skb, sizeof(struct iphdr)))
+-			return NF_DROP;
+-		iph = ip_hdr(skb);
+-		ipv4_change_dsfield(iph, 0, nv);
+-	}
+-
+-	return XT_CONTINUE;
++	return 0;
+ }
+ 
+-static unsigned int
+-tos_tg6(struct sk_buff *skb, const struct xt_action_param *par)
++static bool tos_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	const struct xt_tos_target_info *info = par->targinfo;
+-	struct ipv6hdr *iph = ipv6_hdr(skb);
+-	u_int8_t orig, nv;
+-
+-	orig = ipv6_get_dsfield(iph);
+-	nv   = (orig & ~info->tos_mask) ^ info->tos_value;
+-
+-	if (orig != nv) {
+-		if (!skb_make_writable(skb, sizeof(struct iphdr)))
+-			return NF_DROP;
+-		iph = ipv6_hdr(skb);
+-		ipv6_change_dsfield(iph, 0, nv);
+-	}
++	const struct xt_tos_match_info *info = par->matchinfo;
+ 
+-	return XT_CONTINUE;
++	if (par->family == NFPROTO_IPV4)
++		return ((ip_hdr(skb)->tos & info->tos_mask) ==
++		       info->tos_value) ^ !!info->invert;
++	else
++		return ((ipv6_get_dsfield(ipv6_hdr(skb)) & info->tos_mask) ==
++		       info->tos_value) ^ !!info->invert;
+ }
+ 
+-static struct xt_target dscp_tg_reg[] __read_mostly = {
++static struct xt_match dscp_mt_reg[] __read_mostly = {
+ 	{
+-		.name		= "DSCP",
++		.name		= "dscp",
+ 		.family		= NFPROTO_IPV4,
+-		.checkentry	= dscp_tg_check,
+-		.target		= dscp_tg,
+-		.targetsize	= sizeof(struct xt_DSCP_info),
+-		.table		= "mangle",
++		.checkentry	= dscp_mt_check,
++		.match		= dscp_mt,
++		.matchsize	= sizeof(struct xt_dscp_info),
+ 		.me		= THIS_MODULE,
+ 	},
+ 	{
+-		.name		= "DSCP",
++		.name		= "dscp",
+ 		.family		= NFPROTO_IPV6,
+-		.checkentry	= dscp_tg_check,
+-		.target		= dscp_tg6,
+-		.targetsize	= sizeof(struct xt_DSCP_info),
+-		.table		= "mangle",
++		.checkentry	= dscp_mt_check,
++		.match		= dscp_mt6,
++		.matchsize	= sizeof(struct xt_dscp_info),
+ 		.me		= THIS_MODULE,
+ 	},
+ 	{
+-		.name		= "TOS",
++		.name		= "tos",
+ 		.revision	= 1,
+ 		.family		= NFPROTO_IPV4,
+-		.table		= "mangle",
+-		.target		= tos_tg,
+-		.targetsize	= sizeof(struct xt_tos_target_info),
++		.match		= tos_mt,
++		.matchsize	= sizeof(struct xt_tos_match_info),
+ 		.me		= THIS_MODULE,
+ 	},
+ 	{
+-		.name		= "TOS",
++		.name		= "tos",
+ 		.revision	= 1,
+ 		.family		= NFPROTO_IPV6,
+-		.table		= "mangle",
+-		.target		= tos_tg6,
+-		.targetsize	= sizeof(struct xt_tos_target_info),
++		.match		= tos_mt,
++		.matchsize	= sizeof(struct xt_tos_match_info),
+ 		.me		= THIS_MODULE,
+ 	},
+ };
+ 
+-static int __init dscp_tg_init(void)
++static int __init dscp_mt_init(void)
+ {
+-	return xt_register_targets(dscp_tg_reg, ARRAY_SIZE(dscp_tg_reg));
++	return xt_register_matches(dscp_mt_reg, ARRAY_SIZE(dscp_mt_reg));
+ }
+ 
+-static void __exit dscp_tg_exit(void)
++static void __exit dscp_mt_exit(void)
+ {
+-	xt_unregister_targets(dscp_tg_reg, ARRAY_SIZE(dscp_tg_reg));
++	xt_unregister_matches(dscp_mt_reg, ARRAY_SIZE(dscp_mt_reg));
+ }
+ 
+-module_init(dscp_tg_init);
+-module_exit(dscp_tg_exit);
++module_init(dscp_mt_init);
++module_exit(dscp_mt_exit);
+diff -Naur linux-3.0.54/net/netfilter/xt_hl.c linux-3.0.54_1/net/netfilter/xt_hl.c
+--- linux-3.0.54/net/netfilter/xt_hl.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/netfilter/xt_hl.c	2012-12-03 12:59:38.000000000 -0800
+@@ -1,96 +1,169 @@
+ /*
+- * IP tables module for matching the value of the TTL
+- * (C) 2000,2001 by Harald Welte <laforge@netfilter.org>
++ * TTL modification target for IP tables
++ * (C) 2000,2005 by Harald Welte <laforge@netfilter.org>
+  *
+- * Hop Limit matching module
+- * (C) 2001-2002 Maciej Soltysiak <solt@dns.toxicfilms.tv>
++ * Hop Limit modification target for ip6tables
++ * Maciej Soltysiak <solt@dns.toxicfilms.tv>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+  * published by the Free Software Foundation.
+  */
+-
+-#include <linux/ip.h>
+-#include <linux/ipv6.h>
++#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
++#include <linux/ip.h>
++#include <linux/ipv6.h>
++#include <net/checksum.h>
+ 
+ #include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter_ipv4/ipt_ttl.h>
+-#include <linux/netfilter_ipv6/ip6t_hl.h>
++#include <linux/netfilter_ipv4/ipt_TTL.h>
++#include <linux/netfilter_ipv6/ip6t_HL.h>
+ 
++MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
+ MODULE_AUTHOR("Maciej Soltysiak <solt@dns.toxicfilms.tv>");
+-MODULE_DESCRIPTION("Xtables: Hoplimit/TTL field match");
++MODULE_DESCRIPTION("Xtables: Hoplimit/TTL Limit field modification target");
+ MODULE_LICENSE("GPL");
+-MODULE_ALIAS("ipt_ttl");
+-MODULE_ALIAS("ip6t_hl");
+ 
+-static bool ttl_mt(const struct sk_buff *skb, struct xt_action_param *par)
++static unsigned int
++ttl_tg(struct sk_buff *skb, const struct xt_action_param *par)
+ {
+-	const struct ipt_ttl_info *info = par->matchinfo;
+-	const u8 ttl = ip_hdr(skb)->ttl;
++	struct iphdr *iph;
++	const struct ipt_TTL_info *info = par->targinfo;
++	int new_ttl;
++
++	if (!skb_make_writable(skb, skb->len))
++		return NF_DROP;
++
++	iph = ip_hdr(skb);
+ 
+ 	switch (info->mode) {
+-		case IPT_TTL_EQ:
+-			return ttl == info->ttl;
+-		case IPT_TTL_NE:
+-			return ttl != info->ttl;
+-		case IPT_TTL_LT:
+-			return ttl < info->ttl;
+-		case IPT_TTL_GT:
+-			return ttl > info->ttl;
++		case IPT_TTL_SET:
++			new_ttl = info->ttl;
++			break;
++		case IPT_TTL_INC:
++			new_ttl = iph->ttl + info->ttl;
++			if (new_ttl > 255)
++				new_ttl = 255;
++			break;
++		case IPT_TTL_DEC:
++			new_ttl = iph->ttl - info->ttl;
++			if (new_ttl < 0)
++				new_ttl = 0;
++			break;
++		default:
++			new_ttl = iph->ttl;
++			break;
++	}
++
++	if (new_ttl != iph->ttl) {
++		csum_replace2(&iph->check, htons(iph->ttl << 8),
++					   htons(new_ttl << 8));
++		iph->ttl = new_ttl;
+ 	}
+ 
+-	return false;
++	return XT_CONTINUE;
+ }
+ 
+-static bool hl_mt6(const struct sk_buff *skb, struct xt_action_param *par)
++static unsigned int
++hl_tg6(struct sk_buff *skb, const struct xt_action_param *par)
+ {
+-	const struct ip6t_hl_info *info = par->matchinfo;
+-	const struct ipv6hdr *ip6h = ipv6_hdr(skb);
++	struct ipv6hdr *ip6h;
++	const struct ip6t_HL_info *info = par->targinfo;
++	int new_hl;
++
++	if (!skb_make_writable(skb, skb->len))
++		return NF_DROP;
++
++	ip6h = ipv6_hdr(skb);
+ 
+ 	switch (info->mode) {
+-		case IP6T_HL_EQ:
+-			return ip6h->hop_limit == info->hop_limit;
+-		case IP6T_HL_NE:
+-			return ip6h->hop_limit != info->hop_limit;
+-		case IP6T_HL_LT:
+-			return ip6h->hop_limit < info->hop_limit;
+-		case IP6T_HL_GT:
+-			return ip6h->hop_limit > info->hop_limit;
++		case IP6T_HL_SET:
++			new_hl = info->hop_limit;
++			break;
++		case IP6T_HL_INC:
++			new_hl = ip6h->hop_limit + info->hop_limit;
++			if (new_hl > 255)
++				new_hl = 255;
++			break;
++		case IP6T_HL_DEC:
++			new_hl = ip6h->hop_limit - info->hop_limit;
++			if (new_hl < 0)
++				new_hl = 0;
++			break;
++		default:
++			new_hl = ip6h->hop_limit;
++			break;
+ 	}
+ 
+-	return false;
++	ip6h->hop_limit = new_hl;
++
++	return XT_CONTINUE;
++}
++
++static int ttl_tg_check(const struct xt_tgchk_param *par)
++{
++	const struct ipt_TTL_info *info = par->targinfo;
++
++	if (info->mode > IPT_TTL_MAXMODE) {
++		pr_info("TTL: invalid or unknown mode %u\n", info->mode);
++		return -EINVAL;
++	}
++	if (info->mode != IPT_TTL_SET && info->ttl == 0)
++		return -EINVAL;
++	return 0;
++}
++
++static int hl_tg6_check(const struct xt_tgchk_param *par)
++{
++	const struct ip6t_HL_info *info = par->targinfo;
++
++	if (info->mode > IP6T_HL_MAXMODE) {
++		pr_info("invalid or unknown mode %u\n", info->mode);
++		return -EINVAL;
++	}
++	if (info->mode != IP6T_HL_SET && info->hop_limit == 0) {
++		pr_info("increment/decrement does not "
++			"make sense with value 0\n");
++		return -EINVAL;
++	}
++	return 0;
+ }
+ 
+-static struct xt_match hl_mt_reg[] __read_mostly = {
++static struct xt_target hl_tg_reg[] __read_mostly = {
+ 	{
+-		.name       = "ttl",
++		.name       = "TTL",
+ 		.revision   = 0,
+ 		.family     = NFPROTO_IPV4,
+-		.match      = ttl_mt,
+-		.matchsize  = sizeof(struct ipt_ttl_info),
++		.target     = ttl_tg,
++		.targetsize = sizeof(struct ipt_TTL_info),
++		.table      = "mangle",
++		.checkentry = ttl_tg_check,
+ 		.me         = THIS_MODULE,
+ 	},
+ 	{
+-		.name       = "hl",
++		.name       = "HL",
+ 		.revision   = 0,
+ 		.family     = NFPROTO_IPV6,
+-		.match      = hl_mt6,
+-		.matchsize  = sizeof(struct ip6t_hl_info),
++		.target     = hl_tg6,
++		.targetsize = sizeof(struct ip6t_HL_info),
++		.table      = "mangle",
++		.checkentry = hl_tg6_check,
+ 		.me         = THIS_MODULE,
+ 	},
+ };
+ 
+-static int __init hl_mt_init(void)
++static int __init hl_tg_init(void)
+ {
+-	return xt_register_matches(hl_mt_reg, ARRAY_SIZE(hl_mt_reg));
++	return xt_register_targets(hl_tg_reg, ARRAY_SIZE(hl_tg_reg));
+ }
+ 
+-static void __exit hl_mt_exit(void)
++static void __exit hl_tg_exit(void)
+ {
+-	xt_unregister_matches(hl_mt_reg, ARRAY_SIZE(hl_mt_reg));
++	xt_unregister_targets(hl_tg_reg, ARRAY_SIZE(hl_tg_reg));
+ }
+ 
+-module_init(hl_mt_init);
+-module_exit(hl_mt_exit);
++module_init(hl_tg_init);
++module_exit(hl_tg_exit);
++MODULE_ALIAS("ipt_TTL");
++MODULE_ALIAS("ip6t_HL");
+diff -Naur linux-3.0.54/net/netfilter/xt_HL.c linux-3.0.54_1/net/netfilter/xt_HL.c
+--- linux-3.0.54/net/netfilter/xt_HL.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/netfilter/xt_HL.c	1969-12-31 16:00:00.000000000 -0800
+@@ -1,169 +0,0 @@
+-/*
+- * TTL modification target for IP tables
+- * (C) 2000,2005 by Harald Welte <laforge@netfilter.org>
+- *
+- * Hop Limit modification target for ip6tables
+- * Maciej Soltysiak <solt@dns.toxicfilms.tv>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 as
+- * published by the Free Software Foundation.
+- */
+-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+-#include <linux/module.h>
+-#include <linux/skbuff.h>
+-#include <linux/ip.h>
+-#include <linux/ipv6.h>
+-#include <net/checksum.h>
+-
+-#include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter_ipv4/ipt_TTL.h>
+-#include <linux/netfilter_ipv6/ip6t_HL.h>
+-
+-MODULE_AUTHOR("Harald Welte <laforge@netfilter.org>");
+-MODULE_AUTHOR("Maciej Soltysiak <solt@dns.toxicfilms.tv>");
+-MODULE_DESCRIPTION("Xtables: Hoplimit/TTL Limit field modification target");
+-MODULE_LICENSE("GPL");
+-
+-static unsigned int
+-ttl_tg(struct sk_buff *skb, const struct xt_action_param *par)
+-{
+-	struct iphdr *iph;
+-	const struct ipt_TTL_info *info = par->targinfo;
+-	int new_ttl;
+-
+-	if (!skb_make_writable(skb, skb->len))
+-		return NF_DROP;
+-
+-	iph = ip_hdr(skb);
+-
+-	switch (info->mode) {
+-		case IPT_TTL_SET:
+-			new_ttl = info->ttl;
+-			break;
+-		case IPT_TTL_INC:
+-			new_ttl = iph->ttl + info->ttl;
+-			if (new_ttl > 255)
+-				new_ttl = 255;
+-			break;
+-		case IPT_TTL_DEC:
+-			new_ttl = iph->ttl - info->ttl;
+-			if (new_ttl < 0)
+-				new_ttl = 0;
+-			break;
+-		default:
+-			new_ttl = iph->ttl;
+-			break;
+-	}
+-
+-	if (new_ttl != iph->ttl) {
+-		csum_replace2(&iph->check, htons(iph->ttl << 8),
+-					   htons(new_ttl << 8));
+-		iph->ttl = new_ttl;
+-	}
+-
+-	return XT_CONTINUE;
+-}
+-
+-static unsigned int
+-hl_tg6(struct sk_buff *skb, const struct xt_action_param *par)
+-{
+-	struct ipv6hdr *ip6h;
+-	const struct ip6t_HL_info *info = par->targinfo;
+-	int new_hl;
+-
+-	if (!skb_make_writable(skb, skb->len))
+-		return NF_DROP;
+-
+-	ip6h = ipv6_hdr(skb);
+-
+-	switch (info->mode) {
+-		case IP6T_HL_SET:
+-			new_hl = info->hop_limit;
+-			break;
+-		case IP6T_HL_INC:
+-			new_hl = ip6h->hop_limit + info->hop_limit;
+-			if (new_hl > 255)
+-				new_hl = 255;
+-			break;
+-		case IP6T_HL_DEC:
+-			new_hl = ip6h->hop_limit - info->hop_limit;
+-			if (new_hl < 0)
+-				new_hl = 0;
+-			break;
+-		default:
+-			new_hl = ip6h->hop_limit;
+-			break;
+-	}
+-
+-	ip6h->hop_limit = new_hl;
+-
+-	return XT_CONTINUE;
+-}
+-
+-static int ttl_tg_check(const struct xt_tgchk_param *par)
+-{
+-	const struct ipt_TTL_info *info = par->targinfo;
+-
+-	if (info->mode > IPT_TTL_MAXMODE) {
+-		pr_info("TTL: invalid or unknown mode %u\n", info->mode);
+-		return -EINVAL;
+-	}
+-	if (info->mode != IPT_TTL_SET && info->ttl == 0)
+-		return -EINVAL;
+-	return 0;
+-}
+-
+-static int hl_tg6_check(const struct xt_tgchk_param *par)
+-{
+-	const struct ip6t_HL_info *info = par->targinfo;
+-
+-	if (info->mode > IP6T_HL_MAXMODE) {
+-		pr_info("invalid or unknown mode %u\n", info->mode);
+-		return -EINVAL;
+-	}
+-	if (info->mode != IP6T_HL_SET && info->hop_limit == 0) {
+-		pr_info("increment/decrement does not "
+-			"make sense with value 0\n");
+-		return -EINVAL;
+-	}
+-	return 0;
+-}
+-
+-static struct xt_target hl_tg_reg[] __read_mostly = {
+-	{
+-		.name       = "TTL",
+-		.revision   = 0,
+-		.family     = NFPROTO_IPV4,
+-		.target     = ttl_tg,
+-		.targetsize = sizeof(struct ipt_TTL_info),
+-		.table      = "mangle",
+-		.checkentry = ttl_tg_check,
+-		.me         = THIS_MODULE,
+-	},
+-	{
+-		.name       = "HL",
+-		.revision   = 0,
+-		.family     = NFPROTO_IPV6,
+-		.target     = hl_tg6,
+-		.targetsize = sizeof(struct ip6t_HL_info),
+-		.table      = "mangle",
+-		.checkentry = hl_tg6_check,
+-		.me         = THIS_MODULE,
+-	},
+-};
+-
+-static int __init hl_tg_init(void)
+-{
+-	return xt_register_targets(hl_tg_reg, ARRAY_SIZE(hl_tg_reg));
+-}
+-
+-static void __exit hl_tg_exit(void)
+-{
+-	xt_unregister_targets(hl_tg_reg, ARRAY_SIZE(hl_tg_reg));
+-}
+-
+-module_init(hl_tg_init);
+-module_exit(hl_tg_exit);
+-MODULE_ALIAS("ipt_TTL");
+-MODULE_ALIAS("ip6t_HL");
+diff -Naur linux-3.0.54/net/netfilter/xt_rateest.c linux-3.0.54_1/net/netfilter/xt_rateest.c
+--- linux-3.0.54/net/netfilter/xt_rateest.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/netfilter/xt_rateest.c	1969-12-31 16:00:00.000000000 -0800
+@@ -1,158 +0,0 @@
+-/*
+- * (C) 2007 Patrick McHardy <kaber@trash.net>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 as
+- * published by the Free Software Foundation.
+- */
+-#include <linux/module.h>
+-#include <linux/skbuff.h>
+-#include <linux/gen_stats.h>
+-
+-#include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter/xt_rateest.h>
+-#include <net/netfilter/xt_rateest.h>
+-
+-
+-static bool
+-xt_rateest_mt(const struct sk_buff *skb, struct xt_action_param *par)
+-{
+-	const struct xt_rateest_match_info *info = par->matchinfo;
+-	struct gnet_stats_rate_est *r;
+-	u_int32_t bps1, bps2, pps1, pps2;
+-	bool ret = true;
+-
+-	spin_lock_bh(&info->est1->lock);
+-	r = &info->est1->rstats;
+-	if (info->flags & XT_RATEEST_MATCH_DELTA) {
+-		bps1 = info->bps1 >= r->bps ? info->bps1 - r->bps : 0;
+-		pps1 = info->pps1 >= r->pps ? info->pps1 - r->pps : 0;
+-	} else {
+-		bps1 = r->bps;
+-		pps1 = r->pps;
+-	}
+-	spin_unlock_bh(&info->est1->lock);
+-
+-	if (info->flags & XT_RATEEST_MATCH_ABS) {
+-		bps2 = info->bps2;
+-		pps2 = info->pps2;
+-	} else {
+-		spin_lock_bh(&info->est2->lock);
+-		r = &info->est2->rstats;
+-		if (info->flags & XT_RATEEST_MATCH_DELTA) {
+-			bps2 = info->bps2 >= r->bps ? info->bps2 - r->bps : 0;
+-			pps2 = info->pps2 >= r->pps ? info->pps2 - r->pps : 0;
+-		} else {
+-			bps2 = r->bps;
+-			pps2 = r->pps;
+-		}
+-		spin_unlock_bh(&info->est2->lock);
+-	}
+-
+-	switch (info->mode) {
+-	case XT_RATEEST_MATCH_LT:
+-		if (info->flags & XT_RATEEST_MATCH_BPS)
+-			ret &= bps1 < bps2;
+-		if (info->flags & XT_RATEEST_MATCH_PPS)
+-			ret &= pps1 < pps2;
+-		break;
+-	case XT_RATEEST_MATCH_GT:
+-		if (info->flags & XT_RATEEST_MATCH_BPS)
+-			ret &= bps1 > bps2;
+-		if (info->flags & XT_RATEEST_MATCH_PPS)
+-			ret &= pps1 > pps2;
+-		break;
+-	case XT_RATEEST_MATCH_EQ:
+-		if (info->flags & XT_RATEEST_MATCH_BPS)
+-			ret &= bps1 == bps2;
+-		if (info->flags & XT_RATEEST_MATCH_PPS)
+-			ret &= pps1 == pps2;
+-		break;
+-	}
+-
+-	ret ^= info->flags & XT_RATEEST_MATCH_INVERT ? true : false;
+-	return ret;
+-}
+-
+-static int xt_rateest_mt_checkentry(const struct xt_mtchk_param *par)
+-{
+-	struct xt_rateest_match_info *info = par->matchinfo;
+-	struct xt_rateest *est1, *est2;
+-	int ret = false;
+-
+-	if (hweight32(info->flags & (XT_RATEEST_MATCH_ABS |
+-				     XT_RATEEST_MATCH_REL)) != 1)
+-		goto err1;
+-
+-	if (!(info->flags & (XT_RATEEST_MATCH_BPS | XT_RATEEST_MATCH_PPS)))
+-		goto err1;
+-
+-	switch (info->mode) {
+-	case XT_RATEEST_MATCH_EQ:
+-	case XT_RATEEST_MATCH_LT:
+-	case XT_RATEEST_MATCH_GT:
+-		break;
+-	default:
+-		goto err1;
+-	}
+-
+-	ret  = -ENOENT;
+-	est1 = xt_rateest_lookup(info->name1);
+-	if (!est1)
+-		goto err1;
+-
+-	if (info->flags & XT_RATEEST_MATCH_REL) {
+-		est2 = xt_rateest_lookup(info->name2);
+-		if (!est2)
+-			goto err2;
+-	} else
+-		est2 = NULL;
+-
+-
+-	info->est1 = est1;
+-	info->est2 = est2;
+-	return 0;
+-
+-err2:
+-	xt_rateest_put(est1);
+-err1:
+-	return -EINVAL;
+-}
+-
+-static void xt_rateest_mt_destroy(const struct xt_mtdtor_param *par)
+-{
+-	struct xt_rateest_match_info *info = par->matchinfo;
+-
+-	xt_rateest_put(info->est1);
+-	if (info->est2)
+-		xt_rateest_put(info->est2);
+-}
+-
+-static struct xt_match xt_rateest_mt_reg __read_mostly = {
+-	.name       = "rateest",
+-	.revision   = 0,
+-	.family     = NFPROTO_UNSPEC,
+-	.match      = xt_rateest_mt,
+-	.checkentry = xt_rateest_mt_checkentry,
+-	.destroy    = xt_rateest_mt_destroy,
+-	.matchsize  = sizeof(struct xt_rateest_match_info),
+-	.me         = THIS_MODULE,
+-};
+-
+-static int __init xt_rateest_mt_init(void)
+-{
+-	return xt_register_match(&xt_rateest_mt_reg);
+-}
+-
+-static void __exit xt_rateest_mt_fini(void)
+-{
+-	xt_unregister_match(&xt_rateest_mt_reg);
+-}
+-
+-MODULE_AUTHOR("Patrick McHardy <kaber@trash.net>");
+-MODULE_LICENSE("GPL");
+-MODULE_DESCRIPTION("xtables rate estimator match");
+-MODULE_ALIAS("ipt_rateest");
+-MODULE_ALIAS("ip6t_rateest");
+-module_init(xt_rateest_mt_init);
+-module_exit(xt_rateest_mt_fini);
+diff -Naur linux-3.0.54/net/netfilter/xt_RATEEST.c linux-3.0.54_1/net/netfilter/xt_RATEEST.c
+--- linux-3.0.54/net/netfilter/xt_RATEEST.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/netfilter/xt_RATEEST.c	2012-12-03 12:59:38.000000000 -0800
+@@ -8,194 +8,151 @@
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
+ #include <linux/gen_stats.h>
+-#include <linux/jhash.h>
+-#include <linux/rtnetlink.h>
+-#include <linux/random.h>
+-#include <linux/slab.h>
+-#include <net/gen_stats.h>
+-#include <net/netlink.h>
+ 
+ #include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter/xt_RATEEST.h>
++#include <linux/netfilter/xt_rateest.h>
+ #include <net/netfilter/xt_rateest.h>
+ 
+-static DEFINE_MUTEX(xt_rateest_mutex);
+ 
+-#define RATEEST_HSIZE	16
+-static struct hlist_head rateest_hash[RATEEST_HSIZE] __read_mostly;
+-static unsigned int jhash_rnd __read_mostly;
+-static bool rnd_inited __read_mostly;
+-
+-static unsigned int xt_rateest_hash(const char *name)
+-{
+-	return jhash(name, FIELD_SIZEOF(struct xt_rateest, name), jhash_rnd) &
+-	       (RATEEST_HSIZE - 1);
+-}
+-
+-static void xt_rateest_hash_insert(struct xt_rateest *est)
++static bool
++xt_rateest_mt(const struct sk_buff *skb, struct xt_action_param *par)
+ {
+-	unsigned int h;
+-
+-	h = xt_rateest_hash(est->name);
+-	hlist_add_head(&est->list, &rateest_hash[h]);
+-}
++	const struct xt_rateest_match_info *info = par->matchinfo;
++	struct gnet_stats_rate_est *r;
++	u_int32_t bps1, bps2, pps1, pps2;
++	bool ret = true;
++
++	spin_lock_bh(&info->est1->lock);
++	r = &info->est1->rstats;
++	if (info->flags & XT_RATEEST_MATCH_DELTA) {
++		bps1 = info->bps1 >= r->bps ? info->bps1 - r->bps : 0;
++		pps1 = info->pps1 >= r->pps ? info->pps1 - r->pps : 0;
++	} else {
++		bps1 = r->bps;
++		pps1 = r->pps;
++	}
++	spin_unlock_bh(&info->est1->lock);
+ 
+-struct xt_rateest *xt_rateest_lookup(const char *name)
+-{
+-	struct xt_rateest *est;
+-	struct hlist_node *n;
+-	unsigned int h;
+-
+-	h = xt_rateest_hash(name);
+-	mutex_lock(&xt_rateest_mutex);
+-	hlist_for_each_entry(est, n, &rateest_hash[h], list) {
+-		if (strcmp(est->name, name) == 0) {
+-			est->refcnt++;
+-			mutex_unlock(&xt_rateest_mutex);
+-			return est;
++	if (info->flags & XT_RATEEST_MATCH_ABS) {
++		bps2 = info->bps2;
++		pps2 = info->pps2;
++	} else {
++		spin_lock_bh(&info->est2->lock);
++		r = &info->est2->rstats;
++		if (info->flags & XT_RATEEST_MATCH_DELTA) {
++			bps2 = info->bps2 >= r->bps ? info->bps2 - r->bps : 0;
++			pps2 = info->pps2 >= r->pps ? info->pps2 - r->pps : 0;
++		} else {
++			bps2 = r->bps;
++			pps2 = r->pps;
+ 		}
++		spin_unlock_bh(&info->est2->lock);
+ 	}
+-	mutex_unlock(&xt_rateest_mutex);
+-	return NULL;
+-}
+-EXPORT_SYMBOL_GPL(xt_rateest_lookup);
+ 
+-static void xt_rateest_free_rcu(struct rcu_head *head)
+-{
+-	kfree(container_of(head, struct xt_rateest, rcu));
+-}
+-
+-void xt_rateest_put(struct xt_rateest *est)
+-{
+-	mutex_lock(&xt_rateest_mutex);
+-	if (--est->refcnt == 0) {
+-		hlist_del(&est->list);
+-		gen_kill_estimator(&est->bstats, &est->rstats);
+-		/*
+-		 * gen_estimator est_timer() might access est->lock or bstats,
+-		 * wait a RCU grace period before freeing 'est'
+-		 */
+-		call_rcu(&est->rcu, xt_rateest_free_rcu);
++	switch (info->mode) {
++	case XT_RATEEST_MATCH_LT:
++		if (info->flags & XT_RATEEST_MATCH_BPS)
++			ret &= bps1 < bps2;
++		if (info->flags & XT_RATEEST_MATCH_PPS)
++			ret &= pps1 < pps2;
++		break;
++	case XT_RATEEST_MATCH_GT:
++		if (info->flags & XT_RATEEST_MATCH_BPS)
++			ret &= bps1 > bps2;
++		if (info->flags & XT_RATEEST_MATCH_PPS)
++			ret &= pps1 > pps2;
++		break;
++	case XT_RATEEST_MATCH_EQ:
++		if (info->flags & XT_RATEEST_MATCH_BPS)
++			ret &= bps1 == bps2;
++		if (info->flags & XT_RATEEST_MATCH_PPS)
++			ret &= pps1 == pps2;
++		break;
+ 	}
+-	mutex_unlock(&xt_rateest_mutex);
++
++	ret ^= info->flags & XT_RATEEST_MATCH_INVERT ? true : false;
++	return ret;
+ }
+-EXPORT_SYMBOL_GPL(xt_rateest_put);
+ 
+-static unsigned int
+-xt_rateest_tg(struct sk_buff *skb, const struct xt_action_param *par)
++static int xt_rateest_mt_checkentry(const struct xt_mtchk_param *par)
+ {
+-	const struct xt_rateest_target_info *info = par->targinfo;
+-	struct gnet_stats_basic_packed *stats = &info->est->bstats;
+-
+-	spin_lock_bh(&info->est->lock);
+-	stats->bytes += skb->len;
+-	stats->packets++;
+-	spin_unlock_bh(&info->est->lock);
++	struct xt_rateest_match_info *info = par->matchinfo;
++	struct xt_rateest *est1, *est2;
++	int ret = false;
+ 
+-	return XT_CONTINUE;
+-}
++	if (hweight32(info->flags & (XT_RATEEST_MATCH_ABS |
++				     XT_RATEEST_MATCH_REL)) != 1)
++		goto err1;
+ 
+-static int xt_rateest_tg_checkentry(const struct xt_tgchk_param *par)
+-{
+-	struct xt_rateest_target_info *info = par->targinfo;
+-	struct xt_rateest *est;
+-	struct {
+-		struct nlattr		opt;
+-		struct gnet_estimator	est;
+-	} cfg;
+-	int ret;
+-
+-	if (unlikely(!rnd_inited)) {
+-		get_random_bytes(&jhash_rnd, sizeof(jhash_rnd));
+-		rnd_inited = true;
+-	}
++	if (!(info->flags & (XT_RATEEST_MATCH_BPS | XT_RATEEST_MATCH_PPS)))
++		goto err1;
+ 
+-	est = xt_rateest_lookup(info->name);
+-	if (est) {
+-		/*
+-		 * If estimator parameters are specified, they must match the
+-		 * existing estimator.
+-		 */
+-		if ((!info->interval && !info->ewma_log) ||
+-		    (info->interval != est->params.interval ||
+-		     info->ewma_log != est->params.ewma_log)) {
+-			xt_rateest_put(est);
+-			return -EINVAL;
+-		}
+-		info->est = est;
+-		return 0;
++	switch (info->mode) {
++	case XT_RATEEST_MATCH_EQ:
++	case XT_RATEEST_MATCH_LT:
++	case XT_RATEEST_MATCH_GT:
++		break;
++	default:
++		goto err1;
+ 	}
+ 
+-	ret = -ENOMEM;
+-	est = kzalloc(sizeof(*est), GFP_KERNEL);
+-	if (!est)
++	ret  = -ENOENT;
++	est1 = xt_rateest_lookup(info->name1);
++	if (!est1)
+ 		goto err1;
+ 
+-	strlcpy(est->name, info->name, sizeof(est->name));
+-	spin_lock_init(&est->lock);
+-	est->refcnt		= 1;
+-	est->params.interval	= info->interval;
+-	est->params.ewma_log	= info->ewma_log;
+-
+-	cfg.opt.nla_len		= nla_attr_size(sizeof(cfg.est));
+-	cfg.opt.nla_type	= TCA_STATS_RATE_EST;
+-	cfg.est.interval	= info->interval;
+-	cfg.est.ewma_log	= info->ewma_log;
+-
+-	ret = gen_new_estimator(&est->bstats, &est->rstats,
+-				&est->lock, &cfg.opt);
+-	if (ret < 0)
+-		goto err2;
++	if (info->flags & XT_RATEEST_MATCH_REL) {
++		est2 = xt_rateest_lookup(info->name2);
++		if (!est2)
++			goto err2;
++	} else
++		est2 = NULL;
+ 
+-	info->est = est;
+-	xt_rateest_hash_insert(est);
++
++	info->est1 = est1;
++	info->est2 = est2;
+ 	return 0;
+ 
+ err2:
+-	kfree(est);
++	xt_rateest_put(est1);
+ err1:
+-	return ret;
++	return -EINVAL;
+ }
+ 
+-static void xt_rateest_tg_destroy(const struct xt_tgdtor_param *par)
++static void xt_rateest_mt_destroy(const struct xt_mtdtor_param *par)
+ {
+-	struct xt_rateest_target_info *info = par->targinfo;
++	struct xt_rateest_match_info *info = par->matchinfo;
+ 
+-	xt_rateest_put(info->est);
++	xt_rateest_put(info->est1);
++	if (info->est2)
++		xt_rateest_put(info->est2);
+ }
+ 
+-static struct xt_target xt_rateest_tg_reg __read_mostly = {
+-	.name       = "RATEEST",
++static struct xt_match xt_rateest_mt_reg __read_mostly = {
++	.name       = "rateest",
+ 	.revision   = 0,
+ 	.family     = NFPROTO_UNSPEC,
+-	.target     = xt_rateest_tg,
+-	.checkentry = xt_rateest_tg_checkentry,
+-	.destroy    = xt_rateest_tg_destroy,
+-	.targetsize = sizeof(struct xt_rateest_target_info),
++	.match      = xt_rateest_mt,
++	.checkentry = xt_rateest_mt_checkentry,
++	.destroy    = xt_rateest_mt_destroy,
++	.matchsize  = sizeof(struct xt_rateest_match_info),
+ 	.me         = THIS_MODULE,
+ };
+ 
+-static int __init xt_rateest_tg_init(void)
++static int __init xt_rateest_mt_init(void)
+ {
+-	unsigned int i;
+-
+-	for (i = 0; i < ARRAY_SIZE(rateest_hash); i++)
+-		INIT_HLIST_HEAD(&rateest_hash[i]);
+-
+-	return xt_register_target(&xt_rateest_tg_reg);
++	return xt_register_match(&xt_rateest_mt_reg);
+ }
+ 
+-static void __exit xt_rateest_tg_fini(void)
++static void __exit xt_rateest_mt_fini(void)
+ {
+-	xt_unregister_target(&xt_rateest_tg_reg);
+-	rcu_barrier(); /* Wait for completion of call_rcu()'s (xt_rateest_free_rcu) */
++	xt_unregister_match(&xt_rateest_mt_reg);
+ }
+ 
+-
+ MODULE_AUTHOR("Patrick McHardy <kaber@trash.net>");
+ MODULE_LICENSE("GPL");
+-MODULE_DESCRIPTION("Xtables: packet rate estimator");
+-MODULE_ALIAS("ipt_RATEEST");
+-MODULE_ALIAS("ip6t_RATEEST");
+-module_init(xt_rateest_tg_init);
+-module_exit(xt_rateest_tg_fini);
++MODULE_DESCRIPTION("xtables rate estimator match");
++MODULE_ALIAS("ipt_rateest");
++MODULE_ALIAS("ip6t_rateest");
++module_init(xt_rateest_mt_init);
++module_exit(xt_rateest_mt_fini);
+diff -Naur linux-3.0.54/net/netfilter/xt_tcpmss.c linux-3.0.54_1/net/netfilter/xt_tcpmss.c
+--- linux-3.0.54/net/netfilter/xt_tcpmss.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/netfilter/xt_tcpmss.c	1969-12-31 16:00:00.000000000 -0800
+@@ -1,110 +0,0 @@
+-/* Kernel module to match TCP MSS values. */
+-
+-/* Copyright (C) 2000 Marc Boucher <marc@mbsi.ca>
+- * Portions (C) 2005 by Harald Welte <laforge@netfilter.org>
+- *
+- * This program is free software; you can redistribute it and/or modify
+- * it under the terms of the GNU General Public License version 2 as
+- * published by the Free Software Foundation.
+- */
+-
+-#include <linux/module.h>
+-#include <linux/skbuff.h>
+-#include <net/tcp.h>
+-
+-#include <linux/netfilter/xt_tcpmss.h>
+-#include <linux/netfilter/x_tables.h>
+-
+-#include <linux/netfilter_ipv4/ip_tables.h>
+-#include <linux/netfilter_ipv6/ip6_tables.h>
+-
+-MODULE_LICENSE("GPL");
+-MODULE_AUTHOR("Marc Boucher <marc@mbsi.ca>");
+-MODULE_DESCRIPTION("Xtables: TCP MSS match");
+-MODULE_ALIAS("ipt_tcpmss");
+-MODULE_ALIAS("ip6t_tcpmss");
+-
+-static bool
+-tcpmss_mt(const struct sk_buff *skb, struct xt_action_param *par)
+-{
+-	const struct xt_tcpmss_match_info *info = par->matchinfo;
+-	const struct tcphdr *th;
+-	struct tcphdr _tcph;
+-	/* tcp.doff is only 4 bits, ie. max 15 * 4 bytes */
+-	const u_int8_t *op;
+-	u8 _opt[15 * 4 - sizeof(_tcph)];
+-	unsigned int i, optlen;
+-
+-	/* If we don't have the whole header, drop packet. */
+-	th = skb_header_pointer(skb, par->thoff, sizeof(_tcph), &_tcph);
+-	if (th == NULL)
+-		goto dropit;
+-
+-	/* Malformed. */
+-	if (th->doff*4 < sizeof(*th))
+-		goto dropit;
+-
+-	optlen = th->doff*4 - sizeof(*th);
+-	if (!optlen)
+-		goto out;
+-
+-	/* Truncated options. */
+-	op = skb_header_pointer(skb, par->thoff + sizeof(*th), optlen, _opt);
+-	if (op == NULL)
+-		goto dropit;
+-
+-	for (i = 0; i < optlen; ) {
+-		if (op[i] == TCPOPT_MSS
+-		    && (optlen - i) >= TCPOLEN_MSS
+-		    && op[i+1] == TCPOLEN_MSS) {
+-			u_int16_t mssval;
+-
+-			mssval = (op[i+2] << 8) | op[i+3];
+-
+-			return (mssval >= info->mss_min &&
+-				mssval <= info->mss_max) ^ info->invert;
+-		}
+-		if (op[i] < 2)
+-			i++;
+-		else
+-			i += op[i+1] ? : 1;
+-	}
+-out:
+-	return info->invert;
+-
+-dropit:
+-	par->hotdrop = true;
+-	return false;
+-}
+-
+-static struct xt_match tcpmss_mt_reg[] __read_mostly = {
+-	{
+-		.name		= "tcpmss",
+-		.family		= NFPROTO_IPV4,
+-		.match		= tcpmss_mt,
+-		.matchsize	= sizeof(struct xt_tcpmss_match_info),
+-		.proto		= IPPROTO_TCP,
+-		.me		= THIS_MODULE,
+-	},
+-	{
+-		.name		= "tcpmss",
+-		.family		= NFPROTO_IPV6,
+-		.match		= tcpmss_mt,
+-		.matchsize	= sizeof(struct xt_tcpmss_match_info),
+-		.proto		= IPPROTO_TCP,
+-		.me		= THIS_MODULE,
+-	},
+-};
+-
+-static int __init tcpmss_mt_init(void)
+-{
+-	return xt_register_matches(tcpmss_mt_reg, ARRAY_SIZE(tcpmss_mt_reg));
+-}
+-
+-static void __exit tcpmss_mt_exit(void)
+-{
+-	xt_unregister_matches(tcpmss_mt_reg, ARRAY_SIZE(tcpmss_mt_reg));
+-}
+-
+-module_init(tcpmss_mt_init);
+-module_exit(tcpmss_mt_exit);
+diff -Naur linux-3.0.54/net/netfilter/xt_TCPMSS.c linux-3.0.54_1/net/netfilter/xt_TCPMSS.c
+--- linux-3.0.54/net/netfilter/xt_TCPMSS.c	2012-12-03 12:59:38.000000000 -0800
++++ linux-3.0.54_1/net/netfilter/xt_TCPMSS.c	2012-12-03 12:59:38.000000000 -0800
+@@ -1,319 +1,110 @@
+-/*
+- * This is a module which is used for setting the MSS option in TCP packets.
+- *
+- * Copyright (C) 2000 Marc Boucher <marc@mbsi.ca>
++/* Kernel module to match TCP MSS values. */
++
++/* Copyright (C) 2000 Marc Boucher <marc@mbsi.ca>
++ * Portions (C) 2005 by Harald Welte <laforge@netfilter.org>
+  *
+  * This program is free software; you can redistribute it and/or modify
+  * it under the terms of the GNU General Public License version 2 as
+  * published by the Free Software Foundation.
+  */
+-#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
++
+ #include <linux/module.h>
+ #include <linux/skbuff.h>
+-#include <linux/ip.h>
+-#include <linux/gfp.h>
+-#include <linux/ipv6.h>
+-#include <linux/tcp.h>
+-#include <net/dst.h>
+-#include <net/flow.h>
+-#include <net/ipv6.h>
+-#include <net/route.h>
+ #include <net/tcp.h>
+ 
++#include <linux/netfilter/xt_tcpmss.h>
++#include <linux/netfilter/x_tables.h>
++
+ #include <linux/netfilter_ipv4/ip_tables.h>
+ #include <linux/netfilter_ipv6/ip6_tables.h>
+-#include <linux/netfilter/x_tables.h>
+-#include <linux/netfilter/xt_tcpudp.h>
+-#include <linux/netfilter/xt_TCPMSS.h>
+ 
+ MODULE_LICENSE("GPL");
+ MODULE_AUTHOR("Marc Boucher <marc@mbsi.ca>");
+-MODULE_DESCRIPTION("Xtables: TCP Maximum Segment Size (MSS) adjustment");
+-MODULE_ALIAS("ipt_TCPMSS");
+-MODULE_ALIAS("ip6t_TCPMSS");
++MODULE_DESCRIPTION("Xtables: TCP MSS match");
++MODULE_ALIAS("ipt_tcpmss");
++MODULE_ALIAS("ip6t_tcpmss");
++
++static bool
++tcpmss_mt(const struct sk_buff *skb, struct xt_action_param *par)
++{
++	const struct xt_tcpmss_match_info *info = par->matchinfo;
++	const struct tcphdr *th;
++	struct tcphdr _tcph;
++	/* tcp.doff is only 4 bits, ie. max 15 * 4 bytes */
++	const u_int8_t *op;
++	u8 _opt[15 * 4 - sizeof(_tcph)];
++	unsigned int i, optlen;
++
++	/* If we don't have the whole header, drop packet. */
++	th = skb_header_pointer(skb, par->thoff, sizeof(_tcph), &_tcph);
++	if (th == NULL)
++		goto dropit;
++
++	/* Malformed. */
++	if (th->doff*4 < sizeof(*th))
++		goto dropit;
++
++	optlen = th->doff*4 - sizeof(*th);
++	if (!optlen)
++		goto out;
++
++	/* Truncated options. */
++	op = skb_header_pointer(skb, par->thoff + sizeof(*th), optlen, _opt);
++	if (op == NULL)
++		goto dropit;
++
++	for (i = 0; i < optlen; ) {
++		if (op[i] == TCPOPT_MSS
++		    && (optlen - i) >= TCPOLEN_MSS
++		    && op[i+1] == TCPOLEN_MSS) {
++			u_int16_t mssval;
+ 
+-static inline unsigned int
+-optlen(const u_int8_t *opt, unsigned int offset)
+-{
+-	/* Beware zero-length options: make finite progress */
+-	if (opt[offset] <= TCPOPT_NOP || opt[offset+1] == 0)
+-		return 1;
+-	else
+-		return opt[offset+1];
+-}
++			mssval = (op[i+2] << 8) | op[i+3];
+ 
+-static int
+-tcpmss_mangle_packet(struct sk_buff *skb,
+-		     const struct xt_tcpmss_info *info,
+-		     unsigned int in_mtu,
+-		     unsigned int tcphoff,
+-		     unsigned int minlen)
+-{
+-	struct tcphdr *tcph;
+-	unsigned int tcplen, i;
+-	__be16 oldval;
+-	u16 newmss;
+-	u8 *opt;
+-
+-	if (!skb_make_writable(skb, skb->len))
+-		return -1;
+-
+-	tcplen = skb->len - tcphoff;
+-	tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
+-
+-	/* Header cannot be larger than the packet */
+-	if (tcplen < tcph->doff*4)
+-		return -1;
+-
+-	if (info->mss == XT_TCPMSS_CLAMP_PMTU) {
+-		if (dst_mtu(skb_dst(skb)) <= minlen) {
+-			if (net_ratelimit())
+-				pr_err("unknown or invalid path-MTU (%u)\n",
+-				       dst_mtu(skb_dst(skb)));
+-			return -1;
+-		}
+-		if (in_mtu <= minlen) {
+-			if (net_ratelimit())
+-				pr_err("unknown or invalid path-MTU (%u)\n",
+-				       in_mtu);
+-			return -1;
+-		}
+-		newmss = min(dst_mtu(skb_dst(skb)), in_mtu) - minlen;
+-	} else
+-		newmss = info->mss;
+-
+-	opt = (u_int8_t *)tcph;
+-	for (i = sizeof(struct tcphdr); i < tcph->doff*4; i += optlen(opt, i)) {
+-		if (opt[i] == TCPOPT_MSS && tcph->doff*4 - i >= TCPOLEN_MSS &&
+-		    opt[i+1] == TCPOLEN_MSS) {
+-			u_int16_t oldmss;
+-
+-			oldmss = (opt[i+2] << 8) | opt[i+3];
+-
+-			/* Never increase MSS, even when setting it, as
+-			 * doing so results in problems for hosts that rely
+-			 * on MSS being set correctly.
+-			 */
+-			if (oldmss <= newmss)
+-				return 0;
+-
+-			opt[i+2] = (newmss & 0xff00) >> 8;
+-			opt[i+3] = newmss & 0x00ff;
+-
+-			inet_proto_csum_replace2(&tcph->check, skb,
+-						 htons(oldmss), htons(newmss),
+-						 0);
+-			return 0;
++			return (mssval >= info->mss_min &&
++				mssval <= info->mss_max) ^ info->invert;
+ 		}
++		if (op[i] < 2)
++			i++;
++		else
++			i += op[i+1] ? : 1;
+ 	}
++out:
++	return info->invert;
+ 
+-	/* There is data after the header so the option can't be added
+-	   without moving it, and doing so may make the SYN packet
+-	   itself too large. Accept the packet unmodified instead. */
+-	if (tcplen > tcph->doff*4)
+-		return 0;
+-
+-	/*
+-	 * MSS Option not found ?! add it..
+-	 */
+-	if (skb_tailroom(skb) < TCPOLEN_MSS) {
+-		if (pskb_expand_head(skb, 0,
+-				     TCPOLEN_MSS - skb_tailroom(skb),
+-				     GFP_ATOMIC))
+-			return -1;
+-		tcph = (struct tcphdr *)(skb_network_header(skb) + tcphoff);
+-	}
+-
+-	skb_put(skb, TCPOLEN_MSS);
+-
+-	opt = (u_int8_t *)tcph + sizeof(struct tcphdr);
+-	memmove(opt + TCPOLEN_MSS, opt, tcplen - sizeof(struct tcphdr));
+-
+-	inet_proto_csum_replace2(&tcph->check, skb,
+-				 htons(tcplen), htons(tcplen + TCPOLEN_MSS), 1);
+-	opt[0] = TCPOPT_MSS;
+-	opt[1] = TCPOLEN_MSS;
+-	opt[2] = (newmss & 0xff00) >> 8;
+-	opt[3] = newmss & 0x00ff;
+-
+-	inet_proto_csum_replace4(&tcph->check, skb, 0, *((__be32 *)opt), 0);
+-
+-	oldval = ((__be16 *)tcph)[6];
+-	tcph->doff += TCPOLEN_MSS/4;
+-	inet_proto_csum_replace2(&tcph->check, skb,
+-				 oldval, ((__be16 *)tcph)[6], 0);
+-	return TCPOLEN_MSS;
+-}
+-
+-static u_int32_t tcpmss_reverse_mtu(const struct sk_buff *skb,
+-				    unsigned int family)
+-{
+-	struct flowi fl;
+-	const struct nf_afinfo *ai;
+-	struct rtable *rt = NULL;
+-	u_int32_t mtu     = ~0U;
+-
+-	if (family == PF_INET) {
+-		struct flowi4 *fl4 = &fl.u.ip4;
+-		memset(fl4, 0, sizeof(*fl4));
+-		fl4->daddr = ip_hdr(skb)->saddr;
+-	} else {
+-		struct flowi6 *fl6 = &fl.u.ip6;
+-
+-		memset(fl6, 0, sizeof(*fl6));
+-		ipv6_addr_copy(&fl6->daddr, &ipv6_hdr(skb)->saddr);
+-	}
+-	rcu_read_lock();
+-	ai = nf_get_afinfo(family);
+-	if (ai != NULL)
+-		ai->route(&init_net, (struct dst_entry **)&rt, &fl, false);
+-	rcu_read_unlock();
+-
+-	if (rt != NULL) {
+-		mtu = dst_mtu(&rt->dst);
+-		dst_release(&rt->dst);
+-	}
+-	return mtu;
+-}
+-
+-static unsigned int
+-tcpmss_tg4(struct sk_buff *skb, const struct xt_action_param *par)
+-{
+-	struct iphdr *iph = ip_hdr(skb);
+-	__be16 newlen;
+-	int ret;
+-
+-	ret = tcpmss_mangle_packet(skb, par->targinfo,
+-				   tcpmss_reverse_mtu(skb, PF_INET),
+-				   iph->ihl * 4,
+-				   sizeof(*iph) + sizeof(struct tcphdr));
+-	if (ret < 0)
+-		return NF_DROP;
+-	if (ret > 0) {
+-		iph = ip_hdr(skb);
+-		newlen = htons(ntohs(iph->tot_len) + ret);
+-		csum_replace2(&iph->check, iph->tot_len, newlen);
+-		iph->tot_len = newlen;
+-	}
+-	return XT_CONTINUE;
+-}
+-
+-#if defined(CONFIG_IP6_NF_IPTABLES) || defined(CONFIG_IP6_NF_IPTABLES_MODULE)
+-static unsigned int
+-tcpmss_tg6(struct sk_buff *skb, const struct xt_action_param *par)
+-{
+-	struct ipv6hdr *ipv6h = ipv6_hdr(skb);
+-	u8 nexthdr;
+-	int tcphoff;
+-	int ret;
+-
+-	nexthdr = ipv6h->nexthdr;
+-	tcphoff = ipv6_skip_exthdr(skb, sizeof(*ipv6h), &nexthdr);
+-	if (tcphoff < 0)
+-		return NF_DROP;
+-	ret = tcpmss_mangle_packet(skb, par->targinfo,
+-				   tcpmss_reverse_mtu(skb, PF_INET6),
+-				   tcphoff,
+-				   sizeof(*ipv6h) + sizeof(struct tcphdr));
+-	if (ret < 0)
+-		return NF_DROP;
+-	if (ret > 0) {
+-		ipv6h = ipv6_hdr(skb);
+-		ipv6h->payload_len = htons(ntohs(ipv6h->payload_len) + ret);
+-	}
+-	return XT_CONTINUE;
+-}
+-#endif
+-
+-/* Must specify -p tcp --syn */
+-static inline bool find_syn_match(const struct xt_entry_match *m)
+-{
+-	const struct xt_tcp *tcpinfo = (const struct xt_tcp *)m->data;
+-
+-	if (strcmp(m->u.kernel.match->name, "tcp") == 0 &&
+-	    tcpinfo->flg_cmp & TCPHDR_SYN &&
+-	    !(tcpinfo->invflags & XT_TCP_INV_FLAGS))
+-		return true;
+-
++dropit:
++	par->hotdrop = true;
+ 	return false;
+ }
+ 
+-static int tcpmss_tg4_check(const struct xt_tgchk_param *par)
+-{
+-	const struct xt_tcpmss_info *info = par->targinfo;
+-	const struct ipt_entry *e = par->entryinfo;
+-	const struct xt_entry_match *ematch;
+-
+-	if (info->mss == XT_TCPMSS_CLAMP_PMTU &&
+-	    (par->hook_mask & ~((1 << NF_INET_FORWARD) |
+-			   (1 << NF_INET_LOCAL_OUT) |
+-			   (1 << NF_INET_POST_ROUTING))) != 0) {
+-		pr_info("path-MTU clamping only supported in "
+-			"FORWARD, OUTPUT and POSTROUTING hooks\n");
+-		return -EINVAL;
+-	}
+-	xt_ematch_foreach(ematch, e)
+-		if (find_syn_match(ematch))
+-			return 0;
+-	pr_info("Only works on TCP SYN packets\n");
+-	return -EINVAL;
+-}
+-
+-#if defined(CONFIG_IP6_NF_IPTABLES) || defined(CONFIG_IP6_NF_IPTABLES_MODULE)
+-static int tcpmss_tg6_check(const struct xt_tgchk_param *par)
+-{
+-	const struct xt_tcpmss_info *info = par->targinfo;
+-	const struct ip6t_entry *e = par->entryinfo;
+-	const struct xt_entry_match *ematch;
+-
+-	if (info->mss == XT_TCPMSS_CLAMP_PMTU &&
+-	    (par->hook_mask & ~((1 << NF_INET_FORWARD) |
+-			   (1 << NF_INET_LOCAL_OUT) |
+-			   (1 << NF_INET_POST_ROUTING))) != 0) {
+-		pr_info("path-MTU clamping only supported in "
+-			"FORWARD, OUTPUT and POSTROUTING hooks\n");
+-		return -EINVAL;
+-	}
+-	xt_ematch_foreach(ematch, e)
+-		if (find_syn_match(ematch))
+-			return 0;
+-	pr_info("Only works on TCP SYN packets\n");
+-	return -EINVAL;
+-}
+-#endif
+-
+-static struct xt_target tcpmss_tg_reg[] __read_mostly = {
++static struct xt_match tcpmss_mt_reg[] __read_mostly = {
+ 	{
++		.name		= "tcpmss",
+ 		.family		= NFPROTO_IPV4,
+-		.name		= "TCPMSS",
+-		.checkentry	= tcpmss_tg4_check,
+-		.target		= tcpmss_tg4,
+-		.targetsize	= sizeof(struct xt_tcpmss_info),
++		.match		= tcpmss_mt,
++		.matchsize	= sizeof(struct xt_tcpmss_match_info),
+ 		.proto		= IPPROTO_TCP,
+ 		.me		= THIS_MODULE,
+ 	},
+-#if defined(CONFIG_IP6_NF_IPTABLES) || defined(CONFIG_IP6_NF_IPTABLES_MODULE)
+ 	{
++		.name		= "tcpmss",
+ 		.family		= NFPROTO_IPV6,
+-		.name		= "TCPMSS",
+-		.checkentry	= tcpmss_tg6_check,
+-		.target		= tcpmss_tg6,
+-		.targetsize	= sizeof(struct xt_tcpmss_info),
++		.match		= tcpmss_mt,
++		.matchsize	= sizeof(struct xt_tcpmss_match_info),
+ 		.proto		= IPPROTO_TCP,
+ 		.me		= THIS_MODULE,
+ 	},
+-#endif
+ };
+ 
+-static int __init tcpmss_tg_init(void)
++static int __init tcpmss_mt_init(void)
+ {
+-	return xt_register_targets(tcpmss_tg_reg, ARRAY_SIZE(tcpmss_tg_reg));
++	return xt_register_matches(tcpmss_mt_reg, ARRAY_SIZE(tcpmss_mt_reg));
+ }
+ 
+-static void __exit tcpmss_tg_exit(void)
++static void __exit tcpmss_mt_exit(void)
+ {
+-	xt_unregister_targets(tcpmss_tg_reg, ARRAY_SIZE(tcpmss_tg_reg));
++	xt_unregister_matches(tcpmss_mt_reg, ARRAY_SIZE(tcpmss_mt_reg));
+ }
+ 
+-module_init(tcpmss_tg_init);
+-module_exit(tcpmss_tg_exit);
++module_init(tcpmss_mt_init);
++module_exit(tcpmss_mt_exit);
